@@ -1,0 +1,22 @@
+[project]
+name = "salt-ai"
+version = "0.1.0"
+description = ""
+authors = [
+    { name = "D1ffic00lt", email = "dm.filinov@gmail.com" },
+    { name = "Cubigator", email = "sergeychuprin2006@gmail.com" }
+]
+license = { file = "LICENSE" }
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+]
+
+[project.urls]
+repository = "https://github.com/D1ffic00lt/salt-ai"
+"Bug Tracker" = "https://github.com/D1ffic00lt/salt-ai/issues"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
