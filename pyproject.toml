@@ -1,16 +1,14 @@
 [project]
 name = "salt-ai"
 version = "0.1.1"
-description = ""
-authors = [
-    { name = "D1ffic00lt", email = "dm.filinov@gmail.com" },
-    { name = "Cubigator", email = "sergeychuprin2006@gmail.com" }
-]
-license = { file = "LICENSE" }
+description = "Lightweight ML pipeline library: configs, data modules, training engine, artifacts, and optional integrations."
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = [
+license = { file = "LICENSE" }
+authors = [
+    { name = "D1ffic00lt", email = "dm.filinov@gmail.com" },
 ]
+keywords = ["salt", "ai", "machine-learning"]
 
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -18,16 +16,24 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
-keywords = ["salt", "ai", "machine-learning"]
+
+dependencies = []
 
 [project.urls]
-repository = "https://github.com/D1ffic00lt/salt-ai"
+Repository = "https://github.com/D1ffic00lt/salt-ai"
 "Bug Tracker" = "https://github.com/D1ffic00lt/salt-ai/issues"
 
-
 [tool.setuptools.packages.find]
-include = ["saltai"]
+where = ["."]
+include = ["saltai*", "saltai_ext*"]
 
 [build-system]
 requires = ["setuptools>=80", "wheel"]
 build-backend = "setuptools.build_meta"
+
+
+[tool.poetry]
+packages = [
+  { include = "saltai" },
+  { include = "saltai_ext" },
+]
