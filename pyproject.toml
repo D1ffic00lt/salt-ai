@@ -1,33 +1,26 @@
-[project]
+[tool.poetry]
 name = "salt-ai"
 version = "0.1.1"
-description = ""
-authors = [
-    { name = "D1ffic00lt", email = "dm.filinov@gmail.com" },
-    { name = "Cubigator", email = "sergeychuprin2006@gmail.com" }
-]
-license = { file = "LICENSE" }
+description = "Lightweight ML pipeline library: configs, data modules, training engine, artifacts, and optional integrations."
+authors = ["D1ffic00lt <dm.filinov@gmail.com>"]
+license = "MIT"
 readme = "README.md"
-requires-python = ">=3.10"
-dependencies = [
-]
-
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
-]
 keywords = ["salt", "ai", "machine-learning"]
-
-[project.urls]
 repository = "https://github.com/D1ffic00lt/salt-ai"
+
+packages = [
+  { include = "saltai" },
+  { include = "saltai_ext" },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.13"
+
+#[tool.poetry.group.dev.dependencies]
+
+[tool.poetry.urls]
 "Bug Tracker" = "https://github.com/D1ffic00lt/salt-ai/issues"
 
-
-[tool.setuptools.packages.find]
-include = ["saltai"]
-
 [build-system]
-requires = ["setuptools>=80", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["poetry-core>=1.9.0"]
+build-backend = "poetry.core.masonry.api"
