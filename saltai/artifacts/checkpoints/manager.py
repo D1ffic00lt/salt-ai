@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import time
-
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +16,10 @@ class CheckpointManager(object):
     def __init__(self, root: str, *, keep_last: int = 3):
         self.root = str(root)
         self.keep_last = int(keep_last)
+
         Path(self.root).mkdir(parents=True, exist_ok=True)
+        Path(os.path.join(self.root, "_tmp")).mkdir(parents=True, exist_ok=True)
+
         self._store = LocalArtifactStore(root=os.path.join(self.root, "_store"))
 
         self._latest: list[ArtifactRef] = []
@@ -25,74 +27,125 @@ class CheckpointManager(object):
         self._best_metric: float | None = None
 
     @staticmethod
-    def _dump_state(obj: Checkpointable, path: str, payload: dict[str, Any]) -> None:
-        payload = dict(payload)
-        payload["state"] = obj.state_dict()
+    def path_of(ref: ArtifactRef) -> str:
+        return ref.uri.replace("file://", "", 1)
+
+    def _tmp_path(self, filename: str) -> str:
+        return os.path.join(self.root, "_tmp", filename)
+
+    @staticmethod
+    def _atomic_json_dump(path: str, payload: dict[str, Any]) -> None:
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False)
         os.replace(tmp, path)
 
-    @staticmethod
-    def path_of(ref: ArtifactRef) -> str:
-        return ref.uri.replace("file://", "", 1)
+    def _build_payload(self, obj: Checkpointable, payload: dict[str, Any]) -> dict[str, Any]:
+        out = dict(payload)
+        out["state"] = dict(obj.state_dict())
+        return out
+
+    def _read_header(self, ref: ArtifactRef) -> tuple[str | None, int | None, float | None]:
+        p = self.path_of(ref)
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            tag = payload.get("tag")
+            step = payload.get("step")
+            metric = payload.get("metric")
+
+            tag_s = tag if isinstance(tag, str) else None
+            step_i = int(step) if isinstance(step, int) else None
+            metric_f = float(metric) if isinstance(metric, (int, float)) else None
+
+            return tag_s, step_i, metric_f
+        except Exception:
+            return None, None, None
 
     def save_latest(self, obj: Checkpointable, *, step: int) -> ArtifactRef:
-        p = os.path.join(self.root, f"latest_step_{int(step)}.ckpt.json")
+        step_i = int(step)
+        tmp_json = self._tmp_path(f"latest_step_{step_i}.ckpt.json")
+        ref: ArtifactRef | None = None
+
         try:
-            self._dump_state(obj, p, {"step": int(step), "ts": time.time(), "tag": "latest"})
+            payload = self._build_payload(obj, {"step": step_i, "ts": time.time(), "tag": "latest"})
+            self._atomic_json_dump(tmp_json, payload)
             ref = self._store.put(
-                p, kind="ckpt", name=f"latest_step_{int(step)}", meta={"step": int(step), "tag": "latest"}
+                tmp_json,
+                kind="ckpt",
+                name=f"latest_step_{step_i}",
+                meta={"step": step_i, "tag": "latest"},
             )
         except BaseException as e:
             raise CheckpointError(
                 EC.CKPT_SAVE_FAILED,
                 "Failed to save latest checkpoint",
                 hint="Check filesystem permissions and free space",
-                context={"path": p, "step": int(step)},
+                context={"tmp_path": tmp_json, "step": step_i},
                 cause=e,
             ) from e
+        finally:
+            try:
+                os.remove(tmp_json)
+            except Exception:
+                pass
 
+        assert ref is not None
         self._latest.append(ref)
         while len(self._latest) > self.keep_last:
             old = self._latest.pop(0)
             try:
                 os.remove(self.path_of(old))
-            except Exception as ex:
+            except Exception:
                 pass
+
         return ref
 
     def save_best(self, obj: Checkpointable, *, metric: float, step: int) -> ArtifactRef:
-        metric = float(metric)
-        if self._best_metric is not None and metric <= self._best_metric:
+        step_i = int(step)
+        metric_f = float(metric)
+
+        if self._best_metric is not None and metric_f <= self._best_metric:
             return self._best  # type: ignore[return-value]
 
-        p = os.path.join(self.root, f"best_step_{int(step)}.ckpt.json")
+        tmp_json = self._tmp_path(f"best_step_{step_i}.ckpt.json")
+        ref: ArtifactRef | None = None
+
         try:
-            self._dump_state(obj, p, {"step": int(step), "ts": time.time(), "tag": "best", "metric": metric})
+            payload = self._build_payload(obj, {"step": step_i, "ts": time.time(), "tag": "best", "metric": metric_f})
+            self._atomic_json_dump(tmp_json, payload)
             ref = self._store.put(
-                p, kind="ckpt", name=f"best_step_{int(step)}", meta={"step": int(step), "tag": "best", "metric": metric}
+                tmp_json,
+                kind="ckpt",
+                name=f"best_step_{step_i}",
+                meta={"step": step_i, "tag": "best", "metric": metric_f},
             )
         except BaseException as e:
             raise CheckpointError(
                 EC.CKPT_SAVE_FAILED,
                 "Failed to save best checkpoint",
                 hint="Check filesystem permissions and free space",
-                context={"path": p, "step": int(step), "metric": metric},
+                context={"tmp_path": tmp_json, "step": step_i, "metric": metric_f},
                 cause=e,
             ) from e
+        finally:
+            try:
+                os.remove(tmp_json)
+            except Exception:
+                pass
 
+        assert ref is not None
         if self._best is not None:
             try:
                 os.remove(self.path_of(self._best))
-            except Exception as ex:
+            except Exception:
                 pass
 
         self._best = ref
-        self._best_metric = metric
+        self._best_metric = metric_f
         return ref
 
-    def load(self, obj: Checkpointable, ref: ArtifactRef) -> dict[str, Any]:
+    def read(self, ref: ArtifactRef) -> dict[str, Any]:
         p = self.path_of(ref)
         try:
             with open(p, "r", encoding="utf-8") as f:
@@ -100,13 +153,77 @@ class CheckpointManager(object):
             state = payload.get("state")
             if not isinstance(state, dict):
                 raise ValueError("Invalid checkpoint payload: missing 'state'")
-            obj.load_state_dict(state)
             return payload
         except BaseException as e:
             raise CheckpointError(
                 EC.CKPT_LOAD_FAILED,
-                "Failed to load checkpoint",
-                hint="Check checkpoint file and compatibility of state_dict",
+                "Failed to read checkpoint",
+                hint="Check checkpoint file integrity",
                 context={"path": p, "ref_name": ref.name, "ref_kind": ref.kind},
                 cause=e,
             ) from e
+
+    def load(self, obj: Checkpointable, ref: ArtifactRef) -> dict[str, Any]:
+        payload = self.read(ref)
+        try:
+            obj.load_state_dict(payload["state"])
+            return payload
+        except BaseException as e:
+            raise CheckpointError(
+                EC.CKPT_LOAD_FAILED,
+                "Failed to load checkpoint into object",
+                hint="Check compatibility of state_dict",
+                context={"ref_name": ref.name, "ref_kind": ref.kind},
+                cause=e,
+            ) from e
+
+    def find_latest(self) -> ArtifactRef | None:
+        items = self._store.list(kind="ckpt")
+        best_ref: ArtifactRef | None = None
+        best_step: int | None = None
+
+        for r in items:
+            tag, step, _ = self._read_header(r)
+            if tag != "latest":
+                continue
+            if step is None:
+                continue
+            if best_step is None or step > best_step:
+                best_step = step
+                best_ref = r
+
+        return best_ref
+
+    def find_best(self) -> ArtifactRef | None:
+        items = self._store.list(kind="ckpt")
+        best_ref: ArtifactRef | None = None
+        best_metric: float | None = None
+        best_step: int | None = None
+
+        for r in items:
+            tag, step, metric = self._read_header(r)
+            if tag != "best":
+                continue
+            if metric is None:
+                continue
+            if step is None:
+                continue
+
+            if (
+                best_metric is None
+                or metric > best_metric
+                or (metric == best_metric and (best_step is None or step > best_step))
+            ):
+                best_metric = metric
+                best_step = step
+                best_ref = r
+
+        return best_ref
+
+    def resolve(self, which: str) -> ArtifactRef | None:
+        w = str(which).strip().lower()
+        if w == "latest":
+            return self.find_latest()
+        if w == "best":
+            return self.find_best()
+        return None

@@ -1,0 +1,14 @@
+repos:
+  - repo: local
+    hooks:
+      - id: black-warn
+        name: black (warn only)
+        language: system
+        types: [python]
+        entry: |
+          bash -c '
+            poetry run black --line-length 120 --check --diff "$@" || {
+              echo "⚠️  Black would reformat files. Run: poetry run black --line-length 120 ." >&2
+              exit 0
+            }
+          ' --
