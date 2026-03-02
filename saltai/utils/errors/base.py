@@ -16,13 +16,13 @@ class ErrorInfo:
 
 class SaltAIError(Exception):
     def __init__(
-            self,
-            code: str,
-            message: str,
-            *,
-            hint: str | None = None,
-            context: Context | None = None,
-            cause: BaseException | None = None,
+        self,
+        code: str,
+        message: str,
+        *,
+        hint: str | None = None,
+        context: Context | None = None,
+        cause: BaseException | None = None,
     ):
         super().__init__(message)
         self.code = code

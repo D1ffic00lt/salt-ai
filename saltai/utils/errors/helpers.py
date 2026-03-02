@@ -10,23 +10,23 @@ T = TypeVar("T")
 
 
 def ensure(
-        cond: bool,
-        *,
-        code: str,
-        message: str,
-        hint: str | None = None,
-        context: Context | None = None,
-        exc_type: type[SaltAIError] = SaltAIError,
+    cond: bool,
+    *,
+    code: str,
+    message: str,
+    hint: str | None = None,
+    context: Context | None = None,
+    exc_type: type[SaltAIError] = SaltAIError,
 ) -> None:
     if not cond:
         raise exc_type(code, message, hint=hint, context=context)
 
 
 def wrap_unknown(
-        e: BaseException,
-        *,
-        message: str = "Unhandled internal error",
-        context: Context | None = None,
+    e: BaseException,
+    *,
+    message: str = "Unhandled internal error",
+    context: Context | None = None,
 ) -> SaltAIError | InternalError:
     if isinstance(e, SaltAIError):
         return e

@@ -26,7 +26,7 @@ __all__ = (
     "MetricPoint",
     "MetricSummary",
     "RunResult",
-    "ArtifactStore"
+    "ArtifactStore",
 )
 
 RunId = NewType("RunId", str)

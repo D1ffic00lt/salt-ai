@@ -3,14 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from .core import (
-    ArtifactRef,
-    Epoch,
-    MetricPoint,
-    RunId, Split,
-    StageName,
-    Step
-)
+from .core import ArtifactRef, Epoch, MetricPoint, RunId, Split, StageName, Step
 from .json_types import JSONObject
 
 __all__ = (

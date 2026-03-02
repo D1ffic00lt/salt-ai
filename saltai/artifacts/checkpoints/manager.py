@@ -41,8 +41,9 @@ class CheckpointManager(object):
         p = os.path.join(self.root, f"latest_step_{int(step)}.ckpt.json")
         try:
             self._dump_state(obj, p, {"step": int(step), "ts": time.time(), "tag": "latest"})
-            ref = self._store.put(p, kind="ckpt", name=f"latest_step_{int(step)}",
-                                  meta={"step": int(step), "tag": "latest"})
+            ref = self._store.put(
+                p, kind="ckpt", name=f"latest_step_{int(step)}", meta={"step": int(step), "tag": "latest"}
+            )
         except BaseException as e:
             raise CheckpointError(
                 EC.CKPT_SAVE_FAILED,
@@ -69,8 +70,9 @@ class CheckpointManager(object):
         p = os.path.join(self.root, f"best_step_{int(step)}.ckpt.json")
         try:
             self._dump_state(obj, p, {"step": int(step), "ts": time.time(), "tag": "best", "metric": metric})
-            ref = self._store.put(p, kind="ckpt", name=f"best_step_{int(step)}",
-                                  meta={"step": int(step), "tag": "best", "metric": metric})
+            ref = self._store.put(
+                p, kind="ckpt", name=f"best_step_{int(step)}", meta={"step": int(step), "tag": "best", "metric": metric}
+            )
         except BaseException as e:
             raise CheckpointError(
                 EC.CKPT_SAVE_FAILED,
