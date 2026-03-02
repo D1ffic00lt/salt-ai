@@ -16,8 +16,6 @@ packages = [
 [tool.poetry.dependencies]
 python = ">=3.10,<3.13"
 
-#[tool.poetry.group.dev.dependencies]
-
 [tool.poetry.urls]
 "Bug Tracker" = "https://github.com/D1ffic00lt/salt-ai/issues"
 
