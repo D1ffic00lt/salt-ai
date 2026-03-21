@@ -14,7 +14,7 @@ class Trainer(object):
     def __init__(self, *, event_bus: EventBus | None = None, run_id: RunId | str = RunId("local")):
         self._bus = event_bus or EventBus([])
         self._run_id = RunId(str(run_id))
-∆
+
     def _publish(self, ev: object) -> None:
         self._bus.publish(ev, context={"run_id": str(self._run_id)})
 
