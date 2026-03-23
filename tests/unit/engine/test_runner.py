@@ -5,6 +5,7 @@ import unittest
 
 from saltai.engine.runner.runner import Runner
 from saltai.engine.event_bus.bus import EventBus
+from saltai.utils.typing.core import MetricSummary
 
 
 class _Sink(object):
@@ -42,9 +43,56 @@ class TestRunner(unittest.TestCase):
             self.assertEqual(m["run_id"], "r1")
             self.assertEqual(m["status"], "success")
             self.assertIsNone(m["error"])
+            self.assertEqual(m["metrics"], {})
 
             self.assertTrue(any(type(e).__name__ == "RunStarted" for e in sink.events))
             self.assertTrue(any(type(e).__name__ == "RunFinished" for e in sink.events))
+
+    def test_runner_stores_body_dict_metrics_in_manifest_and_result(self):
+        with tempfile.TemporaryDirectory() as d:
+            r = Runner()
+
+            def body(_ctx):
+                return {
+                    "train": {"loss": 0.25},
+                    "val": {"accuracy": 0.9},
+                }
+
+            res = r.run(
+                {"run": {"id": "r_metrics_dict"}, "seed": 42, "paths": {"root": d}},
+                body=body,
+            )
+
+            self.assertEqual(res.status, "success")
+            self.assertEqual(res.metrics.values["train"]["loss"], 0.25)
+            self.assertEqual(res.metrics.values["val"]["accuracy"], 0.9)
+
+            with open(res.manifest_path, "r", encoding="utf-8") as f:
+                m = json.load(f)
+
+            self.assertEqual(m["metrics"]["train"]["loss"], 0.25)
+            self.assertEqual(m["metrics"]["val"]["accuracy"], 0.9)
+
+    def test_runner_stores_body_metric_summary_in_manifest_and_result(self):
+        with tempfile.TemporaryDirectory() as d:
+            r = Runner()
+
+            def body(_ctx):
+                return MetricSummary(values={"loss": 0.1}, extra={"source": "body"})
+
+            res = r.run(
+                {"run": {"id": "r_metrics_summary"}, "seed": 42, "paths": {"root": d}},
+                body=body,
+            )
+
+            self.assertEqual(res.status, "success")
+            self.assertEqual(res.metrics.values["loss"], 0.1)
+            self.assertEqual(res.metrics.extra["source"], "body")
+
+            with open(res.manifest_path, "r", encoding="utf-8") as f:
+                m = json.load(f)
+
+            self.assertEqual(m["metrics"]["loss"], 0.1)
 
     def test_runner_failure_writes_failed_manifest(self):
         with tempfile.TemporaryDirectory() as d:
@@ -67,3 +115,4 @@ class TestRunner(unittest.TestCase):
             self.assertIsNotNone(m["error"])
             self.assertIn("code", m["error"])
             self.assertIn("message", m["error"])
+            self.assertEqual(m["metrics"], {})

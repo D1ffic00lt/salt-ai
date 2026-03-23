@@ -141,7 +141,7 @@ class MetricPoint:
 
 @dataclass(frozen=True, slots=True)
 class MetricSummary:
-    values: dict[str, Scalar]
+    values: dict[str, Any]
     extra: JSONObject
 
 

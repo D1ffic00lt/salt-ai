@@ -35,14 +35,14 @@ class RunIO(object):
     )
 
     def __init__(
-        self,
-        *,
-        run_id: RunId,
-        run_dir: str,
-        config_hash: str,
-        bus: EventBus,
-        store: LocalArtifactStore,
-        ckpt: CheckpointManager | None,
+            self,
+            *,
+            run_id: RunId,
+            run_dir: str,
+            config_hash: str,
+            bus: EventBus,
+            store: LocalArtifactStore,
+            ckpt: CheckpointManager | None,
     ):
         self.run_id = run_id
         self.run_dir = run_dir
@@ -118,15 +118,28 @@ class RunContext(object):
     io: RunIO
 
 
+def _metrics_from_body_result(value: Any) -> MetricSummary:
+    if value is None:
+        return MetricSummary(values={}, extra={})
+
+    if isinstance(value, MetricSummary):
+        return value
+
+    if isinstance(value, dict):
+        return MetricSummary(values=value, extra={})
+
+    return MetricSummary(values={}, extra={"body_result_type": type(value).__name__})
+
+
 class Runner(object):
     def __init__(
-        self,
-        *,
-        event_bus: EventBus | None = None,
-        record_events: bool = False,
-        store_artifacts: bool = False,
-        enable_checkpoints: bool = False,
-        checkpoint_keep_last: int = 3,
+            self,
+            *,
+            event_bus: EventBus | None = None,
+            record_events: bool = False,
+            store_artifacts: bool = False,
+            enable_checkpoints: bool = False,
+            checkpoint_keep_last: int = 3,
     ):
         self._bus = event_bus or EventBus([])
         self._record_events = bool(record_events)
@@ -135,11 +148,11 @@ class Runner(object):
         self._checkpoint_keep_last = int(checkpoint_keep_last)
 
     def run(
-        self,
-        cfg: dict,
-        *,
-        body: Callable[[RunContext], Any] | None = None,
-        resume_from: ArtifactRef | str | None = None,
+            self,
+            cfg: dict,
+            *,
+            body: Callable[[RunContext], Any] | None = None,
+            resume_from: ArtifactRef | str | None = None,
     ) -> RunResult:
         rcfg = validate_config(cfg)
 
@@ -185,6 +198,7 @@ class Runner(object):
 
         status = "success"
         err_info = None
+        metrics = MetricSummary(values={}, extra={})
 
         if resume_from is not None:
             if ckpt is None:
@@ -215,7 +229,8 @@ class Runner(object):
         try:
             pub(StageStarted(type="stage_started", run_id=RunId(rcfg.run_id), ts=time.time(), data={}, stage="run"))
             if body is not None:
-                body(ctx)
+                body_result = body(ctx)
+                metrics = _metrics_from_body_result(body_result)
             pub(StageFinished(type="stage_finished", run_id=RunId(rcfg.run_id), ts=time.time(), data={}, stage="run"))
         except BaseException as e:
             status = "failed"
@@ -256,7 +271,7 @@ class Runner(object):
                     "artifacts": [asdict(a) for a in io.artifacts],
                     "checkpoints": checkpoints_out,
                 },
-                metrics={},
+                metrics=metrics.values,
                 error=err_info,
                 extra={},
             )
@@ -268,7 +283,7 @@ class Runner(object):
         return RunResult(
             run_id=RunId(rcfg.run_id),
             status=status,
-            metrics=MetricSummary(values={}, extra={}),
+            metrics=metrics,
             artifacts=tuple(io.artifacts),
             manifest_path=manifest_path,
             context={"run_dir": run_dir, "config_hash": rcfg.config_hash},
