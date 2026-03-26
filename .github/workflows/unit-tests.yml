@@ -42,3 +42,15 @@ jobs:
       - name: Run unit tests (unittest)
         run: |
           poetry run python -m unittest discover -s tests -p "test*.py" -v
+
+      - name: Build package
+        run: |
+          poetry build
+
+      - name: Smoke test wheel
+        run: |
+          python -m venv /tmp/saltai-smoke
+          source /tmp/saltai-smoke/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install dist/*.whl
+          python -c "from saltai import Runner, Trainer; print(Runner, Trainer)"
