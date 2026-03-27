@@ -1,4 +1,0 @@
-{"type": "run_started", "run_id": "clearml-demo", "ts": 1779462318.1275818, "data": {}}
-{"type": "stage_started", "run_id": "clearml-demo", "ts": 1779462318.128022, "data": {}, "stage": "run"}
-{"type": "stage_finished", "run_id": "clearml-demo", "ts": 1779462318.128271, "data": {}, "stage": "run"}
-{"type": "run_finished", "run_id": "clearml-demo", "ts": 1779462318.128452, "data": {"status": "success"}}
