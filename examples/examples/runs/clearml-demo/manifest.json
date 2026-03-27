@@ -1,0 +1,34 @@
+{
+  "run_id": "clearml-demo",
+  "status": "success",
+  "started_ts": 1779462318.126763,
+  "finished_ts": 1779462318.1286871,
+  "config_hash": "6cf6a361886b9200451d78d57d0b4457500f2e7305cc1727c42b8bd1bafb71e9",
+  "inputs": {
+    "resume": null
+  },
+  "outputs": {
+    "artifacts": [
+      {
+        "id": "48f1cba6050b480ca9be3d215a001ced",
+        "kind": "log",
+        "name": "events",
+        "uri": "file://examples/runs/clearml-demo/artifacts/log/events__48f1cba6050b480ca9be3d215a001ced.jsonl",
+        "sha256": "10fb7413af3bd2681d667cbf6c4a4d1691d6b13cb4b4223f0c51ea65c468966c",
+        "size_bytes": 406,
+        "meta": {}
+      }
+    ],
+    "checkpoints": {
+      "latest": null,
+      "best": null,
+      "resume_from": null
+    }
+  },
+  "metrics": {
+    "accuracy": 0.95,
+    "loss": 0.12
+  },
+  "error": null,
+  "extra": {}
+}

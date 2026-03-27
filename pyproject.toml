@@ -15,6 +15,11 @@ packages = [
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.13"
+clearml = { version = ">=1.16", optional = true }
+
+[tool.poetry.extras]
+clearml = ["clearml"]
+all = ["clearml"]
 
 [tool.poetry.urls]
 "Bug Tracker" = "https://github.com/D1ffic00lt/salt-ai/issues"
