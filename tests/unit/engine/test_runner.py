@@ -94,6 +94,79 @@ class TestRunner(unittest.TestCase):
 
             self.assertEqual(m["metrics"]["loss"], 0.1)
 
+    def test_runio_log_metric_publishes_metric_event(self):
+        with tempfile.TemporaryDirectory() as d:
+            sink = _Sink()
+            bus = EventBus([sink])
+
+            r = Runner(event_bus=bus)
+
+            def body(ctx):
+                ctx.io.log_metric(
+                    "accuracy",
+                    0.91,
+                    step=7,
+                    epoch=1,
+                    split="val",
+                    extra={"source": "body"},
+                )
+
+            res = r.run(
+                {"run": {"id": "r_log_metric"}, "seed": 42, "paths": {"root": d}},
+                body=body,
+            )
+
+            self.assertEqual(res.status, "success")
+
+            metric_events = [e for e in sink.events if type(e).__name__ == "MetricLogged"]
+            self.assertEqual(len(metric_events), 1)
+            self.assertEqual(metric_events[0].point.name, "accuracy")
+            self.assertEqual(metric_events[0].point.value, 0.91)
+            self.assertEqual(metric_events[0].point.step, 7)
+            self.assertEqual(metric_events[0].point.epoch, 1)
+            self.assertEqual(metric_events[0].point.split, "val")
+            self.assertEqual(metric_events[0].point.extra["source"], "body")
+
+    def test_runio_save_artifact_stores_artifact_and_publishes_event(self):
+        with tempfile.TemporaryDirectory() as d:
+            sink = _Sink()
+            bus = EventBus([sink])
+
+            src = os.path.join(d, "model.txt")
+            with open(src, "w", encoding="utf-8") as f:
+                f.write("model")
+
+            r = Runner(event_bus=bus)
+
+            def body(ctx):
+                ctx.io.save_artifact(
+                    src,
+                    kind="model",
+                    name="tiny-model",
+                    meta={"format": "txt"},
+                )
+
+            res = r.run(
+                {"run": {"id": "r_save_artifact"}, "seed": 42, "paths": {"root": d}},
+                body=body,
+            )
+
+            self.assertEqual(res.status, "success")
+            self.assertEqual(len(res.artifacts), 1)
+            self.assertEqual(res.artifacts[0].kind, "model")
+            self.assertEqual(res.artifacts[0].name, "tiny-model")
+            self.assertEqual(res.artifacts[0].meta["format"], "txt")
+
+            artifact_events = [e for e in sink.events if type(e).__name__ == "ArtifactSaved"]
+            self.assertEqual(len(artifact_events), 1)
+            self.assertEqual(artifact_events[0].ref.name, "tiny-model")
+
+            with open(res.manifest_path, "r", encoding="utf-8") as f:
+                m = json.load(f)
+
+            self.assertEqual(len(m["outputs"]["artifacts"]), 1)
+            self.assertEqual(m["outputs"]["artifacts"][0]["name"], "tiny-model")
+
     def test_runner_failure_writes_failed_manifest(self):
         with tempfile.TemporaryDirectory() as d:
             r = Runner()
@@ -116,3 +189,7 @@ class TestRunner(unittest.TestCase):
             self.assertIn("code", m["error"])
             self.assertIn("message", m["error"])
             self.assertEqual(m["metrics"], {})
+
+
+if __name__ == "__main__":
+    unittest.main()

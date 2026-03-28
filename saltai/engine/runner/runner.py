@@ -15,8 +15,16 @@ from saltai.manifest.model.run import RunManifest
 from saltai.utils.errors.base import SaltAIError, CheckpointError
 from saltai.utils.errors.codes import EC
 from saltai.utils.errors.helpers import wrap_unknown
-from saltai.utils.typing.core import ArtifactRef, Checkpointable, MetricSummary, RunId, RunResult
-from saltai.utils.typing.events import RunStarted, RunFinished, StageStarted, StageFinished, CheckpointSaved
+from saltai.utils.typing.core import ArtifactRef, Checkpointable, MetricPoint, MetricSummary, RunId, RunResult
+from saltai.utils.typing.events import (
+    ArtifactSaved,
+    CheckpointSaved,
+    MetricLogged,
+    RunFinished,
+    RunStarted,
+    StageFinished,
+    StageStarted,
+)
 
 
 class RunIO(object):
@@ -60,6 +68,56 @@ class RunIO(object):
 
     def publish(self, ev: object) -> None:
         self.bus.publish(ev, context={"run_id": str(self.run_id), "run_dir": self.run_dir})
+
+    def log_metric(
+            self,
+            name: str,
+            value: float | int,
+            *,
+            step: int | None = None,
+            epoch: int | None = None,
+            split: str | None = None,
+            extra: dict[str, Any] | None = None,
+    ) -> MetricPoint:
+        point = MetricPoint(
+            name=str(name),
+            value=value,
+            step=step,
+            epoch=epoch,
+            split=split,
+            extra=extra or {},
+        )
+        self.publish(
+            MetricLogged(
+                type="metric",
+                run_id=self.run_id,
+                ts=time.time(),
+                data={},
+                point=point,
+            )
+        )
+        return point
+
+    def save_artifact(
+            self,
+            local_path: str,
+            *,
+            kind: str,
+            name: str,
+            meta: dict[str, Any] | None = None,
+    ) -> ArtifactRef:
+        ref = self.store.put(local_path, kind=kind, name=name, meta=meta or {})
+        self.artifacts.append(ref)
+        self.publish(
+            ArtifactSaved(
+                type="artifact_saved",
+                run_id=self.run_id,
+                ts=time.time(),
+                data={},
+                ref=ref,
+            )
+        )
+        return ref
 
     def save_latest(self, obj: Checkpointable, *, step: int) -> ArtifactRef:
         if self.ckpt is None:
