@@ -1,8 +1,12 @@
+import os
+import tempfile
 import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from saltai import Runner
+from saltai.engine.event_bus.bus import EventBus
 from saltai.utils.typing.core import ArtifactId, ArtifactRef, MetricPoint, RunId
 from saltai.utils.typing.events import ArtifactSaved, CheckpointSaved, MetricLogged, RunStarted
 from saltai_ext.clearml import ClearMLLogger, ClearMLNotInstalledError
@@ -43,6 +47,21 @@ class FakeClearMLTask(object):
 
     def close(self):
         self.closed = True
+
+
+class _HelperEventsOnlySink(object):
+    def __init__(self, inner):
+        self.inner = inner
+
+    def log(self, event):
+        if type(event).__name__ in {"MetricLogged", "ArtifactSaved"}:
+            self.inner.log(event)
+
+    def flush(self):
+        self.inner.flush()
+
+    def close(self):
+        return None
 
 
 class TestClearMLLogger(unittest.TestCase):
@@ -151,6 +170,56 @@ class TestClearMLLogger(unittest.TestCase):
 
         self.assertEqual(len(task.logger.texts), 1)
         self.assertIn("run_started", task.logger.texts[0])
+
+    def test_runner_io_helpers_reach_clearml_logger(self):
+        with tempfile.TemporaryDirectory() as d:
+            task = FakeClearMLTask()
+            lg = ClearMLLogger(task=task)
+            bus = EventBus([_HelperEventsOnlySink(lg)])
+
+            src = os.path.join(d, "manual.txt")
+            with open(src, "w", encoding="utf-8") as f:
+                f.write("artifact")
+
+            runner = Runner(event_bus=bus)
+
+            def body(ctx):
+                point = ctx.io.log_metric(
+                    "manual_accuracy",
+                    0.93,
+                    step=5,
+                    epoch=1,
+                    split="val",
+                    extra={"source": "body"},
+                )
+                ref = ctx.io.save_artifact(
+                    src,
+                    kind="model",
+                    name="manual-model",
+                    meta={"format": "txt"},
+                )
+
+                return {
+                    "manual_accuracy": point.value,
+                    "artifact_name": ref.name,
+                }
+
+            res = runner.run(
+                {"run": {"id": "r_clearml_helpers"}, "seed": 42, "paths": {"root": d}},
+                body=body,
+            )
+
+            self.assertEqual(res.status, "success")
+            self.assertEqual(res.metrics.values["manual_accuracy"], 0.93)
+            self.assertEqual(res.metrics.values["artifact_name"], "manual-model")
+
+            self.assertEqual(task.logger.scalars, [("val", "manual_accuracy", 0.93, 5)])
+
+            self.assertEqual(len(task.artifacts), 1)
+            self.assertEqual(task.artifacts[0][0], "manual-model")
+            self.assertIsInstance(task.artifacts[0][1], Path)
+            self.assertTrue(task.artifacts[0][1].exists())
+            self.assertEqual(task.artifacts[0][2], {"format": "txt"})
 
     def test_flush_and_close(self):
         task = FakeClearMLTask()
