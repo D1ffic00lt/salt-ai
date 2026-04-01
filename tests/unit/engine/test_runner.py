@@ -190,6 +190,33 @@ class TestRunner(unittest.TestCase):
             self.assertIn("message", m["error"])
             self.assertEqual(m["metrics"], {})
 
+    def test_runner_failure_publishes_run_failed_event(self):
+        with tempfile.TemporaryDirectory() as d:
+            sink = _Sink()
+            bus = EventBus([sink])
+
+            r = Runner(event_bus=bus)
+
+            def boom(_ctx):
+                raise ValueError("boom")
+
+            res = r.run(
+                {"run": {"id": "r_failed_event"}, "seed": 1, "paths": {"root": d}},
+                body=boom,
+            )
+
+            self.assertEqual(res.status, "failed")
+
+            failed_events = [e for e in sink.events if type(e).__name__ == "RunFailed"]
+            self.assertEqual(len(failed_events), 1)
+            self.assertIn("error", failed_events[0].data)
+            self.assertIn("code", failed_events[0].data["error"])
+            self.assertIn("message", failed_events[0].data["error"])
+
+            finished_events = [e for e in sink.events if type(e).__name__ == "RunFinished"]
+            self.assertEqual(len(finished_events), 1)
+            self.assertEqual(finished_events[0].data["status"], "failed")
+
 
 if __name__ == "__main__":
     unittest.main()

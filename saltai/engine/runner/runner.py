@@ -20,6 +20,7 @@ from saltai.utils.typing.events import (
     ArtifactSaved,
     CheckpointSaved,
     MetricLogged,
+    RunFailed,
     RunFinished,
     RunStarted,
     StageFinished,
@@ -294,6 +295,14 @@ class Runner(object):
             status = "failed"
             se = e if isinstance(e, SaltAIError) else wrap_unknown(e, context={"run_id": rcfg.run_id})
             err_info = asdict(se.to_info())
+            pub(
+                RunFailed(
+                    type="run_failed",
+                    run_id=RunId(rcfg.run_id),
+                    ts=time.time(),
+                    data={"error": err_info},
+                )
+            )
         finally:
             pub(RunFinished(type="run_finished", run_id=RunId(rcfg.run_id), ts=time.time(), data={"status": status}))
             finished = time.time()
