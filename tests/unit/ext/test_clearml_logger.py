@@ -9,8 +9,7 @@ from saltai import Runner
 from saltai.engine.event_bus.bus import EventBus
 from saltai.utils.typing.core import ArtifactId, ArtifactRef, MetricPoint, RunId
 from saltai.utils.typing.events import ArtifactSaved, CheckpointSaved, MetricLogged, RunStarted
-from saltai_ext.clearml import ClearMLLogger, ClearMLNotInstalledError
-
+from saltai.integrations.clearml import ClearMLLogger, ClearMLNotInstalledError
 
 class FakeClearMLInnerLogger(object):
     def __init__(self):
@@ -74,7 +73,7 @@ class TestClearMLLogger(unittest.TestCase):
 
     def test_missing_clearml_has_helpful_error(self):
         with patch(
-                "saltai_ext.clearml.logger._load_task_class",
+                "saltai.integrations.clearml.logger._load_task_class",
                 side_effect=ClearMLNotInstalledError(
                     "ClearML is not installed. Install it with `pip install salt-ai[clearml]`."
                 ),

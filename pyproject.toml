@@ -10,7 +10,6 @@ repository = "https://github.com/D1ffic00lt/salt-ai"
 
 packages = [
   { include = "saltai" },
-  { include = "saltai_ext" },
 ]
 
 [tool.poetry.dependencies]

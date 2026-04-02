@@ -217,6 +217,41 @@ class TestRunner(unittest.TestCase):
             self.assertEqual(len(finished_events), 1)
             self.assertEqual(finished_events[0].data["status"], "failed")
 
+    def test_runner_record_events_writes_run_failed_to_jsonl(self):
+        with tempfile.TemporaryDirectory() as d:
+            r = Runner(record_events=True)
 
+            def boom(_ctx):
+                raise ValueError("boom")
+
+            res = r.run(
+                {"run": {"id": "r_failed_jsonl"}, "seed": 1, "paths": {"root": d}},
+                body=boom,
+            )
+
+            self.assertEqual(res.status, "failed")
+
+            events_path = os.path.join(d, "r_failed_jsonl", "events.jsonl")
+            self.assertTrue(os.path.exists(events_path))
+
+            with open(events_path, "r", encoding="utf-8") as f:
+                events = [json.loads(line) for line in f]
+
+            event_types = [e["type"] for e in events]
+
+            self.assertIn("run_started", event_types)
+            self.assertIn("stage_started", event_types)
+            self.assertIn("run_failed", event_types)
+            self.assertIn("run_finished", event_types)
+
+            failed = [e for e in events if e["type"] == "run_failed"]
+            self.assertEqual(len(failed), 1)
+            self.assertIn("error", failed[0]["data"])
+            self.assertIn("code", failed[0]["data"]["error"])
+            self.assertIn("message", failed[0]["data"]["error"])
+
+            finished = [e for e in events if e["type"] == "run_finished"]
+            self.assertEqual(len(finished), 1)
+            self.assertEqual(finished[0]["data"]["status"], "failed")
 if __name__ == "__main__":
     unittest.main()
