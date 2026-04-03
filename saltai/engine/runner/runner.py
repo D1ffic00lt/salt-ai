@@ -15,7 +15,15 @@ from saltai.manifest.model.run import RunManifest
 from saltai.utils.errors.base import SaltAIError, CheckpointError
 from saltai.utils.errors.codes import EC
 from saltai.utils.errors.helpers import wrap_unknown
-from saltai.utils.typing.core import ArtifactRef, Checkpointable, MetricPoint, MetricSummary, RunId, RunResult
+from saltai.utils.typing.core import (
+    ArtifactRef,
+    ArtifactStore,
+    Checkpointable,
+    MetricPoint,
+    MetricSummary,
+    RunId,
+    RunResult,
+)
 from saltai.utils.typing.events import (
     ArtifactSaved,
     CheckpointSaved,
@@ -26,6 +34,8 @@ from saltai.utils.typing.events import (
     StageFinished,
     StageStarted,
 )
+
+ArtifactStoreFactory = Callable[[str], ArtifactStore]
 
 
 class RunIO(object):
@@ -50,7 +60,7 @@ class RunIO(object):
             run_dir: str,
             config_hash: str,
             bus: EventBus,
-            store: LocalArtifactStore,
+            store: ArtifactStore,
             ckpt: CheckpointManager | None,
     ):
         self.run_id = run_id
@@ -199,12 +209,14 @@ class Runner(object):
             store_artifacts: bool = False,
             enable_checkpoints: bool = False,
             checkpoint_keep_last: int = 3,
+            artifact_store_factory: ArtifactStoreFactory | None = None,
     ):
         self._bus = event_bus or EventBus([])
         self._record_events = bool(record_events)
         self._store_artifacts = bool(store_artifacts)
         self._enable_checkpoints = bool(enable_checkpoints)
         self._checkpoint_keep_last = int(checkpoint_keep_last)
+        self._artifact_store_factory = artifact_store_factory
 
     def run(
             self,
@@ -221,7 +233,10 @@ class Runner(object):
         manifest_path = os.path.join(run_dir, "manifest.json")
         started = time.time()
 
-        store = LocalArtifactStore(root=os.path.join(run_dir, "artifacts"))
+        if self._artifact_store_factory is None:
+            store = LocalArtifactStore(root=os.path.join(run_dir, "artifacts"))
+        else:
+            store = self._artifact_store_factory(run_dir)
 
         ckpt = None
         if self._enable_checkpoints:

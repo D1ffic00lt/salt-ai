@@ -3,9 +3,9 @@ import os
 import tempfile
 import unittest
 
-from saltai.engine.runner.runner import Runner
 from saltai.engine.event_bus.bus import EventBus
-from saltai.utils.typing.core import MetricSummary
+from saltai.engine.runner.runner import Runner
+from saltai.utils.typing.core import ArtifactId, ArtifactRef, MetricSummary
 
 
 class _Sink(object):
@@ -20,6 +20,44 @@ class _Sink(object):
 
     def close(self):
         return None
+
+
+class _FakeArtifactStore(object):
+    def __init__(self):
+        self.put_calls = []
+        self.refs = []
+
+    def put(self, local_path, *, kind, name, meta=None):
+        ref = ArtifactRef(
+            id=ArtifactId(f"fake-{len(self.refs) + 1}"),
+            kind=kind,
+            name=name,
+            uri=f"memory://{kind}/{name}",
+            sha256=None,
+            size_bytes=None,
+            meta=meta or {},
+        )
+        self.put_calls.append(
+            {
+                "local_path": local_path,
+                "kind": kind,
+                "name": name,
+                "meta": meta or {},
+            }
+        )
+        self.refs.append(ref)
+        return ref
+
+    def get(self, ref, *, dst_dir):
+        return os.path.join(dst_dir, ref.name)
+
+    def exists(self, ref):
+        return ref in self.refs
+
+    def list(self, *, kind=None):
+        if kind is None:
+            return tuple(self.refs)
+        return tuple(ref for ref in self.refs if ref.kind == kind)
 
 
 class TestRunner(unittest.TestCase):
@@ -167,6 +205,81 @@ class TestRunner(unittest.TestCase):
             self.assertEqual(len(m["outputs"]["artifacts"]), 1)
             self.assertEqual(m["outputs"]["artifacts"][0]["name"], "tiny-model")
 
+    def test_runner_uses_injected_artifact_store_factory_for_runio_artifacts(self):
+        with tempfile.TemporaryDirectory() as d:
+            created = []
+            store = _FakeArtifactStore()
+
+            def make_store(run_dir):
+                created.append(run_dir)
+                return store
+
+            src = os.path.join(d, "model.txt")
+            with open(src, "w", encoding="utf-8") as f:
+                f.write("model")
+
+            r = Runner(artifact_store_factory=make_store)
+
+            def body(ctx):
+                ref = ctx.io.save_artifact(
+                    src,
+                    kind="model",
+                    name="remote-model",
+                    meta={"format": "txt"},
+                )
+                return {"artifact_uri": ref.uri}
+
+            res = r.run(
+                {"run": {"id": "r_injected_store"}, "seed": 42, "paths": {"root": d}},
+                body=body,
+            )
+
+            self.assertEqual(res.status, "success")
+            self.assertEqual(created, [os.path.join(d, "r_injected_store")])
+
+            self.assertEqual(len(store.put_calls), 1)
+            self.assertEqual(store.put_calls[0]["local_path"], src)
+            self.assertEqual(store.put_calls[0]["kind"], "model")
+            self.assertEqual(store.put_calls[0]["name"], "remote-model")
+            self.assertEqual(store.put_calls[0]["meta"], {"format": "txt"})
+
+            self.assertEqual(len(res.artifacts), 1)
+            self.assertEqual(res.artifacts[0].uri, "memory://model/remote-model")
+            self.assertEqual(res.metrics.values["artifact_uri"], "memory://model/remote-model")
+
+            with open(res.manifest_path, "r", encoding="utf-8") as f:
+                m = json.load(f)
+
+            self.assertEqual(m["outputs"]["artifacts"][0]["uri"], "memory://model/remote-model")
+            self.assertEqual(m["outputs"]["artifacts"][0]["name"], "remote-model")
+
+    def test_runner_uses_injected_artifact_store_factory_for_recorded_events_artifact(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = _FakeArtifactStore()
+
+            r = Runner(
+                record_events=True,
+                store_artifacts=True,
+                artifact_store_factory=lambda _run_dir: store,
+            )
+
+            res = r.run(
+                {"run": {"id": "r_injected_events_store"}, "seed": 42, "paths": {"root": d}},
+                body=lambda _ctx: None,
+            )
+
+            self.assertEqual(res.status, "success")
+            self.assertEqual(len(store.put_calls), 1)
+            self.assertEqual(store.put_calls[0]["kind"], "log")
+            self.assertEqual(store.put_calls[0]["name"], "events")
+
+            with open(res.manifest_path, "r", encoding="utf-8") as f:
+                m = json.load(f)
+
+            self.assertEqual(m["outputs"]["artifacts"][0]["uri"], "memory://log/events")
+            self.assertEqual(m["outputs"]["artifacts"][0]["kind"], "log")
+            self.assertEqual(m["outputs"]["artifacts"][0]["name"], "events")
+
     def test_runner_failure_writes_failed_manifest(self):
         with tempfile.TemporaryDirectory() as d:
             r = Runner()
@@ -253,5 +366,7 @@ class TestRunner(unittest.TestCase):
             finished = [e for e in events if e["type"] == "run_finished"]
             self.assertEqual(len(finished), 1)
             self.assertEqual(finished[0]["data"]["status"], "failed")
+
+
 if __name__ == "__main__":
     unittest.main()
