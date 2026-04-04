@@ -4,7 +4,7 @@ import hashlib
 import os
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import urlparse
 
 from saltai.utils.errors.base import ArtifactError
@@ -36,25 +36,12 @@ def _sha256_file(path: str) -> str:
     return h.hexdigest()
 
 
-def _normalize_prefix(prefix: str) -> str:
-    return prefix.strip("/")
-
-
-def _join_key(*parts: str) -> str:
-    return "/".join(str(p).strip("/") for p in parts if str(p).strip("/"))
-
-
 def _parse_s3_uri(uri: str) -> tuple[str, str]:
     parsed = urlparse(uri)
-    if parsed.scheme != "s3" or not parsed.netloc or not parsed.path:
-        raise ArtifactError(
-            EC.ARTIFACT_READ_FAILED,
-            "Invalid S3 artifact uri",
-            hint="Expected uri format: s3://bucket/key",
-            context={"uri": uri},
-        )
-
-    return parsed.netloc, parsed.path.lstrip("/")
+    key = parsed.path.lstrip("/")
+    if parsed.scheme != "s3" or not parsed.netloc or not key:
+        raise ValueError(f"Invalid S3 artifact URI: {uri}")
+    return parsed.netloc, key
 
 
 class S3ArtifactStore(object):
@@ -64,21 +51,17 @@ class S3ArtifactStore(object):
             bucket: str,
             prefix: str = "",
             client: Any | None = None,
-            endpoint_url: str | None = None,
-            region_name: str | None = None,
-            client_kwargs: dict[str, Any] | None = None,
+            client_kwargs: Mapping[str, Any] | None = None,
     ):
-        self.bucket = str(bucket)
-        self.prefix = _normalize_prefix(prefix)
+        if not bucket:
+            raise ValueError("bucket is required")
+
+        self.bucket = bucket
+        self.prefix = prefix.strip("/")
 
         if client is None:
-            make_client = _load_boto3_client()
-            kwargs = dict(client_kwargs or {})
-            if endpoint_url is not None:
-                kwargs["endpoint_url"] = endpoint_url
-            if region_name is not None:
-                kwargs["region_name"] = region_name
-            client = make_client("s3", **kwargs)
+            boto3_client = _load_boto3_client()
+            client = boto3_client("s3", **dict(client_kwargs or {}))
 
         self.client = client
 
@@ -93,24 +76,18 @@ class S3ArtifactStore(object):
 
         aid = ArtifactId(uuid.uuid4().hex)
         ext = Path(local_path).suffix
-        key = _join_key(self.prefix, kind, f"{name}__{aid}{ext}")
+        key = self._key_for(kind=kind, name=name, artifact_id=aid, ext=ext)
 
         try:
-            self.client.upload_file(local_path, self.bucket, key)
             size = os.path.getsize(local_path)
             sha = _sha256_file(local_path)
+            self.client.upload_file(local_path, self.bucket, key)
         except BaseException as e:
             raise ArtifactError(
                 EC.ARTIFACT_WRITE_FAILED,
-                "Failed to upload artifact to S3",
-                hint="Check S3 credentials, bucket, endpoint and network access",
-                context={
-                    "path": local_path,
-                    "bucket": self.bucket,
-                    "key": key,
-                    "kind": kind,
-                    "name": name,
-                },
+                "Failed to store artifact in S3",
+                hint="Check S3 credentials, bucket permissions, and object key",
+                context={"path": local_path, "bucket": self.bucket, "key": key, "kind": kind, "name": name},
                 cause=e,
             ) from e
 
@@ -125,7 +102,17 @@ class S3ArtifactStore(object):
         )
 
     def get(self, ref: ArtifactRef, *, dst_dir: str) -> str:
-        bucket, key = _parse_s3_uri(ref.uri)
+        try:
+            bucket, key = _parse_s3_uri(ref.uri)
+        except ValueError as e:
+            raise ArtifactError(
+                EC.ARTIFACT_READ_FAILED,
+                "Invalid S3 artifact URI",
+                hint="Expected URI format: s3://bucket/key",
+                context={"uri": ref.uri, "kind": ref.kind, "name": ref.name},
+                cause=e,
+            ) from e
+
         os.makedirs(dst_dir, exist_ok=True)
         dst = os.path.join(dst_dir, os.path.basename(key))
 
@@ -134,57 +121,54 @@ class S3ArtifactStore(object):
         except BaseException as e:
             raise ArtifactError(
                 EC.ARTIFACT_READ_FAILED,
-                "Failed to download artifact from S3",
-                hint="Check S3 credentials, artifact uri and network access",
-                context={"bucket": bucket, "key": key, "dst": dst},
+                "Failed to retrieve artifact from S3",
+                hint="Check S3 credentials, bucket permissions, and artifact URI",
+                context={"bucket": bucket, "key": key, "dst": dst, "kind": ref.kind, "name": ref.name},
                 cause=e,
             ) from e
 
         return dst
 
     def exists(self, ref: ArtifactRef) -> bool:
-        bucket, key = _parse_s3_uri(ref.uri)
-
         try:
+            bucket, key = _parse_s3_uri(ref.uri)
             self.client.head_object(Bucket=bucket, Key=key)
             return True
-        except BaseException:
+        except Exception:
             return False
 
-    def list(self, *, kind: str | None = None):
-        prefix = _join_key(self.prefix, kind or "")
+    def list(self, *, kind: str | None = None) -> list[ArtifactRef]:
+        prefix = self._list_prefix(kind)
+        out: list[ArtifactRef] = []
+        token: str | None = None
 
-        kwargs = {
-            "Bucket": self.bucket,
-            "Prefix": prefix,
-        }
-
-        out = []
         while True:
+            kwargs: dict[str, Any] = {
+                "Bucket": self.bucket,
+                "Prefix": prefix,
+            }
+            if token is not None:
+                kwargs["ContinuationToken"] = token
+
             response = self.client.list_objects_v2(**kwargs)
 
-            for obj in response.get("Contents", []):
-                key = obj["Key"]
-                parts = key.split("/")
-                if self.prefix:
-                    prefix_parts = self.prefix.split("/")
-                    parts = parts[len(prefix_parts):]
-
-                if len(parts) < 2:
+            for item in response.get("Contents", []):
+                key = item.get("Key")
+                if not isinstance(key, str) or key.endswith("/"):
                     continue
 
-                artifact_kind = parts[0]
-                filename = parts[-1]
-                name = filename.split("__", 1)[0]
+                ref_kind = kind.strip("/") if kind is not None else self._kind_from_key(key)
+                if not ref_kind:
+                    continue
 
                 out.append(
                     ArtifactRef(
                         id=ArtifactId(""),
-                        kind=artifact_kind,
-                        name=name,
+                        kind=ref_kind,
+                        name=self._name_from_key(key),
                         uri=f"s3://{self.bucket}/{key}",
                         sha256=None,
-                        size_bytes=int(obj.get("Size", 0)),
+                        size_bytes=item.get("Size"),
                         meta={},
                     )
                 )
@@ -192,6 +176,31 @@ class S3ArtifactStore(object):
             token = response.get("NextContinuationToken")
             if token is None:
                 break
-            kwargs["ContinuationToken"] = token
 
-        return tuple(out)
+        return out
+
+    def _base_prefix(self) -> str:
+        if not self.prefix:
+            return ""
+        return f"{self.prefix}/"
+
+    def _list_prefix(self, kind: str | None) -> str:
+        base = self._base_prefix()
+        if kind is None:
+            return base
+        return f"{base}{kind.strip('/')}/"
+
+    def _key_for(self, *, kind: str, name: str, artifact_id: ArtifactId, ext: str) -> str:
+        return f"{self._list_prefix(kind)}{name.strip('/')}__{artifact_id}{ext}"
+
+    def _kind_from_key(self, key: str) -> str:
+        base = self._base_prefix()
+        rel = key[len(base):] if base and key.startswith(base) else key
+        if "/" not in rel:
+            return ""
+        return rel.split("/", 1)[0]
+
+    @staticmethod
+    def _name_from_key(key: str) -> str:
+        filename = key.rsplit("/", 1)[-1]
+        return filename.split("__", 1)[0]

@@ -9,7 +9,7 @@ keywords = ["salt", "ai", "machine-learning"]
 repository = "https://github.com/D1ffic00lt/salt-ai"
 
 packages = [
-  { include = "saltai" },
+    { include = "saltai" },
 ]
 
 [tool.poetry.dependencies]
@@ -20,7 +20,7 @@ boto3 = { version = ">=1.34", optional = true }
 [tool.poetry.extras]
 clearml = ["clearml"]
 s3 = ["boto3"]
-all = ["clearm", "boto3"]
+all = ["clearml", "boto3"]
 
 [tool.poetry.urls]
 "Bug Tracker" = "https://github.com/D1ffic00lt/salt-ai/issues"
