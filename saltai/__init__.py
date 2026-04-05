@@ -18,6 +18,7 @@ from saltai.utils.typing.core import (
     RunId,
     RunResult,
 )
+from saltai.events import ArtifactSaved, BaseEvent, CheckpointSaved, EventType, MetricLogged
 
 __all__ = (
     "Runner",
@@ -39,4 +40,9 @@ __all__ = (
     "MetricPoint",
     "MetricSummary",
     "Logger",
+    "EventType",
+    "BaseEvent",
+    "MetricLogged",
+    "ArtifactSaved",
+    "CheckpointSaved",
 )
