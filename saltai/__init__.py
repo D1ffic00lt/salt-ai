@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from saltai.artifacts.store import LocalArtifactStore
 from saltai.engine.event_bus.bus import EventBus
 from saltai.engine.runner.runner import Runner, RunContext, RunIO
 from saltai.engine.trainer.trainer import Trainer
 from saltai.logging.base import BaseLogger, NoOpLogger
 from saltai.utils.typing.core import (
     ArtifactRef,
+    ArtifactStore,
     Checkpointable,
     DataModule,
     Logger,
@@ -25,9 +27,11 @@ __all__ = (
     "EventBus",
     "BaseLogger",
     "NoOpLogger",
+    "LocalArtifactStore",
     "RunId",
     "RunResult",
     "ArtifactRef",
+    "ArtifactStore",
     "Checkpointable",
     "DataModule",
     "ModelAdapter",
