@@ -5,6 +5,7 @@ from typing import cast
 
 from saltai.utils.typing.core import Logger
 
+
 class BaseLogger(Logger):
     def log(self, event: object) -> None:
         event_type = getattr(event, "type", None)
