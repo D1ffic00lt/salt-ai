@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from saltai import errors
+from saltai import events
 from saltai.artifacts.store import LocalArtifactStore
 from saltai.engine.event_bus.bus import EventBus
 from saltai.engine.runner.runner import Runner, RunContext, RunIO
@@ -15,12 +17,12 @@ from saltai.utils.typing.core import (
     MetricPoint,
     MetricSummary,
     ModelAdapter,
-    RunId,
     RunResult,
 )
-from saltai.events import ArtifactSaved, BaseEvent, CheckpointSaved, EventType, MetricLogged
 
 __all__ = (
+    "errors",
+    "events",
     "Runner",
     "RunContext",
     "RunIO",
@@ -29,7 +31,6 @@ __all__ = (
     "BaseLogger",
     "NoOpLogger",
     "LocalArtifactStore",
-    "RunId",
     "RunResult",
     "ArtifactRef",
     "ArtifactStore",
@@ -40,9 +41,4 @@ __all__ = (
     "MetricPoint",
     "MetricSummary",
     "Logger",
-    "EventType",
-    "BaseEvent",
-    "MetricLogged",
-    "ArtifactSaved",
-    "CheckpointSaved",
 )
