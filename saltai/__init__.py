@@ -7,6 +7,7 @@ from saltai.engine.event_bus.bus import EventBus
 from saltai.engine.runner.runner import Runner, RunContext, RunIO
 from saltai.engine.trainer.trainer import Trainer
 from saltai.logging.base import BaseLogger, NoOpLogger
+from saltai.runs import RunRecord, RunRegistry
 from saltai.utils.typing.core import (
     ArtifactRef,
     ArtifactStore,
@@ -31,6 +32,8 @@ __all__ = (
     "BaseLogger",
     "NoOpLogger",
     "LocalArtifactStore",
+    "RunRegistry",
+    "RunRecord",
     "RunResult",
     "ArtifactRef",
     "ArtifactStore",
