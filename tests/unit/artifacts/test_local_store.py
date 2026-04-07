@@ -48,3 +48,21 @@ class TestLocalArtifactStore(unittest.TestCase):
             self.assertEqual(len(k1), 3)
             self.assertEqual(len(k2), 1)
             self.assertEqual(len(all_), 4)
+
+    def test_list_preserves_artifact_id_and_name(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = LocalArtifactStore(root=os.path.join(d, "store"))
+
+            src = os.path.join(d, "model.txt")
+            with open(src, "w", encoding="utf-8") as f:
+                f.write("weights")
+
+            ref = store.put(src, kind="model", name="best_model")
+
+            listed = store.list(kind="model")
+
+            self.assertEqual(len(listed), 1)
+            self.assertEqual(listed[0].id, ref.id)
+            self.assertEqual(listed[0].name, ref.name)
+            self.assertEqual(listed[0].kind, ref.kind)
+            self.assertEqual(listed[0].uri, ref.uri)

@@ -24,6 +24,15 @@ def _strip_file_uri(uri: str) -> str:
     return uri[7:] if uri.startswith("file://") else uri
 
 
+def _parse_stored_artifact_filename(filename: str) -> tuple[str, ArtifactId]:
+    if "__" not in filename:
+        return Path(filename).stem, ArtifactId("")
+
+    name, artifact_part = filename.rsplit("__", 1)
+    artifact_id = Path(artifact_part).stem
+    return name, ArtifactId(artifact_id)
+
+
 class LocalArtifactStore(object):
     def __init__(self, root: str):
         self.root = str(root)
@@ -113,10 +122,10 @@ class LocalArtifactStore(object):
                 else:
                     k = kind
 
-                name = fn.split("__", 1)[0]
+                name, aid = _parse_stored_artifact_filename(fn)
                 out.append(
                     ArtifactRef(
-                        id=ArtifactId(""),
+                        id=aid,
                         kind=k,
                         name=name,
                         uri=f"file://{path}",
