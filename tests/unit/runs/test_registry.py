@@ -468,6 +468,457 @@ class TestRunRegistry(unittest.TestCase):
 
             self.assertEqual([record.run_id for record in records], ["r2", "r3", "r1"])
 
+    def test_latest_returns_most_recent_run(self):
+        with tempfile.TemporaryDirectory() as d:
+            _write_manifest(
+                d,
+                "r1",
+                run_id="r1",
+                started_ts=10.0,
+            )
+            _write_manifest(
+                d,
+                "r2",
+                run_id="r2",
+                started_ts=30.0,
+            )
+            _write_manifest(
+                d,
+                "r3",
+                run_id="r3",
+                started_ts=20.0,
+            )
+
+            registry = RunRegistry(d)
+            latest = registry.latest()
+
+            self.assertIsNotNone(latest)
+            self.assertEqual(latest.run_id, "r2")
+
+    def test_latest_applies_filters(self):
+        with tempfile.TemporaryDirectory() as d:
+            _write_manifest(
+                d,
+                "r1",
+                run_id="r1",
+                status="failed",
+                config_hash="cfg-a",
+                started_ts=40.0,
+            )
+            _write_manifest(
+                d,
+                "r2",
+                run_id="r2",
+                status="success",
+                config_hash="cfg-a",
+                started_ts=30.0,
+            )
+            _write_manifest(
+                d,
+                "r3",
+                run_id="r3",
+                status="success",
+                config_hash="cfg-b",
+                started_ts=20.0,
+            )
+            _write_manifest(
+                d,
+                "r4",
+                run_id="r4",
+                status="success",
+                config_hash="cfg-a",
+                started_ts=10.0,
+            )
+
+            registry = RunRegistry(d)
+            latest = registry.latest(status="success", config_hash="cfg-a")
+
+            self.assertIsNotNone(latest)
+            self.assertEqual(latest.run_id, "r2")
+
+    def test_latest_returns_none_if_no_runs_match(self):
+        with tempfile.TemporaryDirectory() as d:
+            _write_manifest(
+                d,
+                "r1",
+                run_id="r1",
+                status="failed",
+                started_ts=10.0,
+            )
+
+            registry = RunRegistry(d)
+
+            self.assertIsNone(registry.latest(status="success"))
+
+    def test_latest_returns_none_if_root_missing(self):
+        with tempfile.TemporaryDirectory() as d:
+            registry = RunRegistry(os.path.join(d, "missing"))
+
+            self.assertIsNone(registry.latest())
+
+    def test_count_returns_number_of_runs(self):
+        with tempfile.TemporaryDirectory() as d:
+            _write_manifest(d, "r1", run_id="r1")
+            _write_manifest(d, "r2", run_id="r2")
+            _write_manifest(d, "r3", run_id="r3")
+
+            registry = RunRegistry(d)
+
+            self.assertEqual(registry.count(), 3)
+
+    def test_count_applies_filters(self):
+        with tempfile.TemporaryDirectory() as d:
+            _write_manifest(
+                d,
+                "r1",
+                run_id="r1",
+                status="success",
+                config_hash="cfg-a",
+            )
+            _write_manifest(
+                d,
+                "r2",
+                run_id="r2",
+                status="failed",
+                config_hash="cfg-a",
+            )
+            _write_manifest(
+                d,
+                "r3",
+                run_id="r3",
+                status="success",
+                config_hash="cfg-b",
+            )
+
+            registry = RunRegistry(d)
+
+            self.assertEqual(registry.count(status="success"), 2)
+            self.assertEqual(registry.count(config_hash="cfg-a"), 2)
+            self.assertEqual(registry.count(status="success", config_hash="cfg-a"), 1)
+            self.assertEqual(registry.count(status="missing"), 0)
+
+    def test_count_returns_zero_if_root_missing(self):
+        with tempfile.TemporaryDirectory() as d:
+            registry = RunRegistry(os.path.join(d, "missing"))
+
+            self.assertEqual(registry.count(), 0)
+
+    def test_status_counts_returns_counts_by_status(self):
+        with tempfile.TemporaryDirectory() as d:
+            _write_manifest(
+                d,
+                "r1",
+                run_id="r1",
+                status="success",
+            )
+            _write_manifest(
+                d,
+                "r2",
+                run_id="r2",
+                status="failed",
+            )
+            _write_manifest(
+                d,
+                "r3",
+                run_id="r3",
+                status="success",
+            )
+
+            registry = RunRegistry(d)
+
+            self.assertEqual(registry.status_counts(), {
+                "success": 2,
+                "failed": 1,
+            })
+
+    def test_status_counts_applies_config_hash_filter(self):
+        with tempfile.TemporaryDirectory() as d:
+            _write_manifest(
+                d,
+                "r1",
+                run_id="r1",
+                status="success",
+                config_hash="cfg-a",
+            )
+            _write_manifest(
+                d,
+                "r2",
+                run_id="r2",
+                status="failed",
+                config_hash="cfg-a",
+            )
+            _write_manifest(
+                d,
+                "r3",
+                run_id="r3",
+                status="success",
+                config_hash="cfg-b",
+            )
+
+            registry = RunRegistry(d)
+
+            self.assertEqual(registry.status_counts(config_hash="cfg-a"), {
+                "success": 1,
+                "failed": 1,
+            })
+
+    def test_status_counts_returns_empty_dict_if_root_missing(self):
+        with tempfile.TemporaryDirectory() as d:
+            registry = RunRegistry(os.path.join(d, "missing"))
+
+            self.assertEqual(registry.status_counts(), {})
+
+    def test_metric_paths_returns_sorted_unique_metric_paths(self):
+        with tempfile.TemporaryDirectory() as d:
+            _write_manifest(
+                d,
+                "r1",
+                run_id="r1",
+                metrics={
+                    "train": {"loss": 0.25},
+                    "val": {"accuracy": 0.91},
+                },
+            )
+            _write_manifest(
+                d,
+                "r2",
+                run_id="r2",
+                metrics={
+                    "train": {"loss": 0.20},
+                    "val": {"loss": 0.30},
+                    "score": 1.0,
+                },
+            )
+
+            registry = RunRegistry(d)
+
+            self.assertEqual(registry.metric_paths(), [
+                "score",
+                "train.loss",
+                "val.accuracy",
+                "val.loss",
+            ])
+
+    def test_metric_paths_applies_filters(self):
+        with tempfile.TemporaryDirectory() as d:
+            _write_manifest(
+                d,
+                "r1",
+                run_id="r1",
+                status="success",
+                config_hash="cfg-a",
+                metrics={"val": {"accuracy": 0.91}},
+            )
+            _write_manifest(
+                d,
+                "r2",
+                run_id="r2",
+                status="failed",
+                config_hash="cfg-a",
+                metrics={"error_score": 1.0},
+            )
+            _write_manifest(
+                d,
+                "r3",
+                run_id="r3",
+                status="success",
+                config_hash="cfg-b",
+                metrics={"train": {"loss": 0.25}},
+            )
+
+            registry = RunRegistry(d)
+
+            self.assertEqual(
+                registry.metric_paths(status="success", config_hash="cfg-a"),
+                ["val.accuracy"],
+            )
+
+    def test_metric_paths_returns_empty_list_if_root_missing(self):
+        with tempfile.TemporaryDirectory() as d:
+            registry = RunRegistry(os.path.join(d, "missing"))
+
+            self.assertEqual(registry.metric_paths(), [])
+
+    def test_record_artifacts_returns_manifest_artifacts(self):
+        with tempfile.TemporaryDirectory() as d:
+            model_ref = {
+                "id": "a1",
+                "kind": "model",
+                "name": "weights",
+                "uri": "file:///tmp/weights.bin",
+                "sha256": "abc",
+                "size_bytes": 123,
+                "meta": {"format": "bin"},
+            }
+            log_ref = {
+                "id": "a2",
+                "kind": "log",
+                "name": "events",
+                "uri": "file:///tmp/events.jsonl",
+                "sha256": "def",
+                "size_bytes": 456,
+                "meta": {},
+            }
+
+            _write_manifest(
+                d,
+                "r1",
+                run_id="r1",
+                outputs={
+                    "artifacts": [model_ref, log_ref],
+                    "checkpoints": {},
+                },
+            )
+
+            record = RunRegistry(d).get("r1")
+
+            self.assertIsNotNone(record)
+            self.assertEqual(record.artifacts(), [model_ref, log_ref])
+            self.assertEqual(record.artifacts(kind="model"), [model_ref])
+            self.assertEqual(record.artifacts(kind="missing"), [])
+
+    def test_record_artifact_finds_by_name_and_kind(self):
+        with tempfile.TemporaryDirectory() as d:
+            model_ref = {
+                "id": "a1",
+                "kind": "model",
+                "name": "weights",
+                "uri": "file:///tmp/weights.bin",
+                "sha256": "abc",
+                "size_bytes": 123,
+                "meta": {},
+            }
+            log_ref = {
+                "id": "a2",
+                "kind": "log",
+                "name": "weights",
+                "uri": "file:///tmp/weights.log",
+                "sha256": "def",
+                "size_bytes": 456,
+                "meta": {},
+            }
+
+            _write_manifest(
+                d,
+                "r1",
+                run_id="r1",
+                outputs={
+                    "artifacts": [model_ref, log_ref],
+                    "checkpoints": {},
+                },
+            )
+
+            record = RunRegistry(d).get("r1")
+
+            self.assertIsNotNone(record)
+            self.assertEqual(record.artifact("weights", kind="model"), model_ref)
+            self.assertEqual(record.artifact("weights", kind="log"), log_ref)
+            self.assertEqual(record.artifact("missing", default="x"), "x")
+
+    def test_record_checkpoint_accessors_return_manifest_checkpoints(self):
+        with tempfile.TemporaryDirectory() as d:
+            latest_ref = {
+                "id": "c1",
+                "kind": "ckpt",
+                "name": "latest_step_1",
+                "uri": "file:///tmp/latest.ckpt.json",
+                "sha256": "abc",
+                "size_bytes": 123,
+                "meta": {"step": 1, "tag": "latest"},
+            }
+            best_ref = {
+                "id": "c2",
+                "kind": "ckpt",
+                "name": "best_step_2",
+                "uri": "file:///tmp/best.ckpt.json",
+                "sha256": "def",
+                "size_bytes": 456,
+                "meta": {"step": 2, "tag": "best", "metric": 0.95},
+            }
+            resume_ref = {
+                "id": "c3",
+                "kind": "ckpt",
+                "name": "latest_step_0",
+                "uri": "file:///tmp/resume.ckpt.json",
+                "sha256": "ghi",
+                "size_bytes": 111,
+                "meta": {"step": 0, "tag": "latest"},
+            }
+
+            _write_manifest(
+                d,
+                "r1",
+                run_id="r1",
+                outputs={
+                    "artifacts": [],
+                    "checkpoints": {
+                        "latest": latest_ref,
+                        "best": best_ref,
+                        "resume_from": resume_ref,
+                    },
+                },
+            )
+
+            record = RunRegistry(d).get("r1")
+
+            self.assertIsNotNone(record)
+            self.assertEqual(record.checkpoint("latest"), latest_ref)
+            self.assertEqual(record.checkpoint("best"), best_ref)
+            self.assertEqual(record.checkpoint("resume_from"), resume_ref)
+            self.assertEqual(record.latest_checkpoint, latest_ref)
+            self.assertEqual(record.best_checkpoint, best_ref)
+            self.assertEqual(record.resume_checkpoint, resume_ref)
+            self.assertEqual(record.checkpoint("missing", default="x"), "x")
+
+    def test_record_artifact_accessors_ignore_malformed_outputs(self):
+        with tempfile.TemporaryDirectory() as d:
+            _write_manifest(
+                d,
+                "r1",
+                run_id="r1",
+                outputs={
+                    "artifacts": "bad",
+                    "checkpoints": "bad",
+                },
+            )
+
+            record = RunRegistry(d).get("r1")
+
+            self.assertIsNotNone(record)
+            self.assertEqual(record.artifacts(), [])
+            self.assertEqual(record.artifact("missing", default="x"), "x")
+            self.assertEqual(record.checkpoint("latest", default="x"), "x")
+            self.assertIsNone(record.latest_checkpoint)
+            self.assertIsNone(record.best_checkpoint)
+            self.assertIsNone(record.resume_checkpoint)
+
+    def test_record_artifact_accessors_skip_malformed_artifact_items(self):
+        with tempfile.TemporaryDirectory() as d:
+            ref = {
+                "id": "a1",
+                "kind": "model",
+                "name": "weights",
+                "uri": "file:///tmp/weights.bin",
+                "sha256": "abc",
+                "size_bytes": 123,
+                "meta": {},
+            }
+
+            _write_manifest(
+                d,
+                "r1",
+                run_id="r1",
+                outputs={
+                    "artifacts": [ref, "bad", None, 123],
+                    "checkpoints": {},
+                },
+            )
+
+            record = RunRegistry(d).get("r1")
+
+            self.assertIsNotNone(record)
+            self.assertEqual(record.artifacts(), [ref])
+
 
 if __name__ == "__main__":
     unittest.main()

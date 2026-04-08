@@ -97,6 +97,57 @@ class RunRecord(object):
 
         return row
 
+    def artifacts(self, *, kind: str | None = None) -> list[dict[str, Any]]:
+        value = self.outputs.get("artifacts")
+        if not isinstance(value, list):
+            return []
+
+        refs: list[dict[str, Any]] = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            if kind is not None and item.get("kind") != kind:
+                continue
+            refs.append(item)
+
+        return refs
+
+    def artifact(
+            self,
+            name: str,
+            *,
+            kind: str | None = None,
+            default: Any = None,
+    ) -> dict[str, Any] | Any:
+        for ref in self.artifacts(kind=kind):
+            if ref.get("name") == name:
+                return ref
+
+        return default
+
+    def checkpoint(self, tag: str, default: Any = None) -> dict[str, Any] | Any:
+        checkpoints = self.outputs.get("checkpoints")
+        if not isinstance(checkpoints, dict):
+            return default
+
+        value = checkpoints.get(tag)
+        if not isinstance(value, dict):
+            return default
+
+        return value
+
+    @property
+    def latest_checkpoint(self) -> dict[str, Any] | None:
+        return self.checkpoint("latest", default=None)
+
+    @property
+    def best_checkpoint(self) -> dict[str, Any] | None:
+        return self.checkpoint("best", default=None)
+
+    @property
+    def resume_checkpoint(self) -> dict[str, Any] | None:
+        return self.checkpoint("resume_from", default=None)
+
 
 class RunRegistry(object):
     def __init__(self, root: str):
@@ -209,3 +260,47 @@ class RunRegistry(object):
             extra=_dict_or_empty(manifest.get("extra")),
             manifest=manifest,
         )
+
+    def latest(
+            self,
+            *,
+            status: str | None = None,
+            config_hash: str | None = None,
+    ) -> RunRecord | None:
+        records = self.list(status=status, config_hash=config_hash)
+        if not records:
+            return None
+        return records[0]
+
+    def count(
+            self,
+            *,
+            status: str | None = None,
+            config_hash: str | None = None,
+    ) -> int:
+        return len(self.list(status=status, config_hash=config_hash))
+
+    def status_counts(
+            self,
+            *,
+            config_hash: str | None = None,
+    ) -> dict[str, int]:
+        counts: dict[str, int] = {}
+
+        for record in self.list(config_hash=config_hash):
+            counts[record.status] = counts.get(record.status, 0) + 1
+
+        return counts
+
+    def metric_paths(
+            self,
+            *,
+            status: str | None = None,
+            config_hash: str | None = None,
+    ) -> list[str]:
+        paths: set[str] = set()
+
+        for record in self.list(status=status, config_hash=config_hash):
+            paths.update(_flatten_metrics(record.metrics).keys())
+
+        return sorted(paths)
