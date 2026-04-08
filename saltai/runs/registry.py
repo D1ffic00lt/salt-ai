@@ -5,6 +5,8 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
+import pandas as pd
+
 
 def _is_number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
@@ -76,27 +78,6 @@ class RunRecord(object):
 
         return value
 
-    def to_row(self) -> dict[str, Any]:
-        row: dict[str, Any] = {
-            "run_id": self.run_id,
-            "run_dir": self.run_dir,
-            "manifest_path": self.manifest_path,
-            "status": self.status,
-            "started_ts": self.started_ts,
-            "finished_ts": self.finished_ts,
-            "duration_s": self.duration_s,
-            "config_hash": self.config_hash,
-            "inputs": self.inputs,
-            "outputs": self.outputs,
-            "error": self.error,
-            "extra": self.extra,
-        }
-
-        for key, value in _flatten_metrics(self.metrics).items():
-            row[f"metric.{key}"] = value
-
-        return row
-
     def artifacts(self, *, kind: str | None = None) -> list[dict[str, Any]]:
         value = self.outputs.get("artifacts")
         if not isinstance(value, list):
@@ -147,6 +128,27 @@ class RunRecord(object):
     @property
     def resume_checkpoint(self) -> dict[str, Any] | None:
         return self.checkpoint("resume_from", default=None)
+
+    def to_row(self) -> dict[str, Any]:
+        row: dict[str, Any] = {
+            "run_id": self.run_id,
+            "run_dir": self.run_dir,
+            "manifest_path": self.manifest_path,
+            "status": self.status,
+            "started_ts": self.started_ts,
+            "finished_ts": self.finished_ts,
+            "duration_s": self.duration_s,
+            "config_hash": self.config_hash,
+            "inputs": self.inputs,
+            "outputs": self.outputs,
+            "error": self.error,
+            "extra": self.extra,
+        }
+
+        for key, value in _flatten_metrics(self.metrics).items():
+            row[f"metric.{key}"] = value
+
+        return row
 
 
 class RunRegistry(object):
@@ -216,51 +218,6 @@ class RunRegistry(object):
 
         return min(candidates, key=lambda item: item[0])[1]
 
-    def to_rows(
-            self,
-            *,
-            status: str | None = None,
-            config_hash: str | None = None,
-    ) -> list[dict[str, Any]]:
-        return [
-            record.to_row()
-            for record in self.list(status=status, config_hash=config_hash)
-        ]
-
-    def _load_record(self, manifest_path: str) -> RunRecord | None:
-        try:
-            with open(manifest_path, "r", encoding="utf-8") as f:
-                manifest = json.load(f)
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-            return None
-
-        if not isinstance(manifest, dict):
-            return None
-
-        run_id = _optional_str(manifest.get("run_id"))
-        if run_id is None:
-            return None
-
-        error = manifest.get("error")
-        if error is not None and not isinstance(error, dict):
-            error = None
-
-        return RunRecord(
-            run_id=run_id,
-            run_dir=os.path.dirname(manifest_path),
-            manifest_path=manifest_path,
-            status=_optional_str(manifest.get("status")) or "",
-            started_ts=_optional_float(manifest.get("started_ts")),
-            finished_ts=_optional_float(manifest.get("finished_ts")),
-            config_hash=_optional_str(manifest.get("config_hash")),
-            metrics=_dict_or_empty(manifest.get("metrics")),
-            inputs=_dict_or_empty(manifest.get("inputs")),
-            outputs=_dict_or_empty(manifest.get("outputs")),
-            error=error,
-            extra=_dict_or_empty(manifest.get("extra")),
-            manifest=manifest,
-        )
-
     def latest(
             self,
             *,
@@ -304,3 +261,84 @@ class RunRegistry(object):
             paths.update(_flatten_metrics(record.metrics).keys())
 
         return sorted(paths)
+
+    def to_rows(
+            self,
+            *,
+            status: str | None = None,
+            config_hash: str | None = None,
+    ) -> list[dict[str, Any]]:
+        return [
+            record.to_row()
+            for record in self.list(status=status, config_hash=config_hash)
+        ]
+
+    def to_dataframe(
+            self,
+            *,
+            status: str | None = None,
+            config_hash: str | None = None,
+    ) -> pd.DataFrame:
+        return pd.DataFrame(
+            self.to_rows(status=status, config_hash=config_hash)
+        )
+
+    def to_csv(
+            self,
+            path: str,
+            *,
+            status: str | None = None,
+            config_hash: str | None = None,
+    ) -> None:
+        self.to_dataframe(status=status, config_hash=config_hash).to_csv(
+            os.fspath(path),
+            index=False,
+        )
+
+    def to_jsonl(
+            self,
+            path: str,
+            *,
+            status: str | None = None,
+            config_hash: str | None = None,
+    ) -> None:
+        self.to_dataframe(status=status, config_hash=config_hash).to_json(
+            os.fspath(path),
+            orient="records",
+            lines=True,
+            force_ascii=False,
+        )
+
+    def _load_record(self, manifest_path: str) -> RunRecord | None:
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return None
+
+        if not isinstance(manifest, dict):
+            return None
+
+        run_id = _optional_str(manifest.get("run_id"))
+        if run_id is None:
+            return None
+
+        error = manifest.get("error")
+        if error is not None and not isinstance(error, dict):
+            error = None
+
+        return RunRecord(
+            run_id=run_id,
+            run_dir=os.path.dirname(manifest_path),
+            manifest_path=manifest_path,
+            status=_optional_str(manifest.get("status")) or "",
+            started_ts=_optional_float(manifest.get("started_ts")),
+            finished_ts=_optional_float(manifest.get("finished_ts")),
+            config_hash=_optional_str(manifest.get("config_hash")),
+            metrics=_dict_or_empty(manifest.get("metrics")),
+            inputs=_dict_or_empty(manifest.get("inputs")),
+            outputs=_dict_or_empty(manifest.get("outputs")),
+            error=error,
+            extra=_dict_or_empty(manifest.get("extra")),
+            manifest=manifest,
+        )

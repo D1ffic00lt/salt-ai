@@ -1,3 +1,4 @@
+import pandas as pd
 import json
 import os
 import tempfile
@@ -918,6 +919,104 @@ class TestRunRegistry(unittest.TestCase):
 
             self.assertIsNotNone(record)
             self.assertEqual(record.artifacts(), [ref])
+
+    def test_to_dataframe_returns_pandas_dataframe(self):
+        with tempfile.TemporaryDirectory() as d:
+            _write_manifest(
+                d,
+                "r1",
+                run_id="r1",
+                status="success",
+                metrics={"val": {"accuracy": 0.91}},
+                inputs={"config": "config.yaml"},
+            )
+
+            df = RunRegistry(d).to_dataframe()
+
+            self.assertIsInstance(df, pd.DataFrame)
+            self.assertEqual(len(df), 1)
+            self.assertEqual(df.iloc[0]["run_id"], "r1")
+            self.assertEqual(df.iloc[0]["status"], "success")
+            self.assertEqual(df.iloc[0]["metric.val.accuracy"], 0.91)
+            self.assertEqual(df.iloc[0]["inputs"], {"config": "config.yaml"})
+
+    def test_to_dataframe_applies_filters(self):
+        with tempfile.TemporaryDirectory() as d:
+            _write_manifest(
+                d,
+                "r1",
+                run_id="r1",
+                status="success",
+                config_hash="cfg-a",
+                metrics={"val": {"accuracy": 0.91}},
+            )
+            _write_manifest(
+                d,
+                "r2",
+                run_id="r2",
+                status="failed",
+                config_hash="cfg-a",
+                metrics={"val": {"accuracy": 0.50}},
+            )
+            _write_manifest(
+                d,
+                "r3",
+                run_id="r3",
+                status="success",
+                config_hash="cfg-b",
+                metrics={"val": {"accuracy": 0.80}},
+            )
+
+            df = RunRegistry(d).to_dataframe(status="success", config_hash="cfg-a")
+
+            self.assertEqual(len(df), 1)
+            self.assertEqual(df.iloc[0]["run_id"], "r1")
+            self.assertEqual(df.iloc[0]["metric.val.accuracy"], 0.91)
+
+    def test_to_csv_writes_dataframe_export(self):
+        with tempfile.TemporaryDirectory() as d:
+            _write_manifest(
+                d,
+                "r1",
+                run_id="r1",
+                status="success",
+                metrics={"val": {"accuracy": 0.91}},
+            )
+
+            out_path = os.path.join(d, "runs.csv")
+
+            RunRegistry(d).to_csv(out_path)
+
+            df = pd.read_csv(out_path)
+
+            self.assertEqual(len(df), 1)
+            self.assertEqual(df.iloc[0]["run_id"], "r1")
+            self.assertEqual(df.iloc[0]["status"], "success")
+            self.assertEqual(df.iloc[0]["metric.val.accuracy"], 0.91)
+
+    def test_to_jsonl_writes_dataframe_export(self):
+        with tempfile.TemporaryDirectory() as d:
+            _write_manifest(
+                d,
+                "r1",
+                run_id="r1",
+                status="success",
+                metrics={"val": {"accuracy": 0.91}},
+                inputs={"config": "config.yaml"},
+            )
+
+            out_path = os.path.join(d, "runs.jsonl")
+
+            RunRegistry(d).to_jsonl(out_path)
+
+            with open(out_path, "r", encoding="utf-8") as f:
+                rows = [json.loads(line) for line in f]
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["run_id"], "r1")
+            self.assertEqual(rows[0]["status"], "success")
+            self.assertEqual(rows[0]["metric.val.accuracy"], 0.91)
+            self.assertEqual(rows[0]["inputs"], {"config": "config.yaml"})
 
 
 if __name__ == "__main__":
