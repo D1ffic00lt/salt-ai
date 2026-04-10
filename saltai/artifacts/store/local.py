@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 
 from saltai.artifacts.refs import artifact_local_path, make_artifact_ref, validate_artifact_key
+from saltai.artifacts.store.base import BaseArtifactStore
 from saltai.utils.errors.base import ArtifactError
 from saltai.utils.errors.codes import EC
 from saltai.utils.typing.core import ArtifactId, ArtifactRef
@@ -30,7 +31,7 @@ def _parse_stored_artifact_filename(filename: str) -> tuple[str, ArtifactId]:
     return name, ArtifactId(artifact_id)
 
 
-class LocalArtifactStore(object):
+class LocalArtifactStore(BaseArtifactStore):
     def __init__(self, root: str):
         self.root = str(root)
         Path(self.root).mkdir(parents=True, exist_ok=True)
@@ -82,8 +83,7 @@ class LocalArtifactStore(object):
         except ArtifactError:
             return False
 
-    @staticmethod
-    def get(ref: ArtifactRef, *, dst_dir: str) -> str:
+    def get(self, ref: ArtifactRef, *, dst_dir: str) -> str:
         src = artifact_local_path(ref)
         if not os.path.exists(src):
             raise ArtifactError(

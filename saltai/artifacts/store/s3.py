@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from saltai.artifacts.refs import make_artifact_ref, validate_artifact_key, validate_artifact_ref
+from saltai.artifacts.store.base import BaseArtifactStore
 from saltai.utils.errors.base import ArtifactError
 from saltai.utils.errors.codes import EC
 from saltai.utils.typing.core import ArtifactId, ArtifactRef
@@ -99,7 +100,7 @@ def _optional_boto3_client(
     )
 
 
-class S3ArtifactStore(object):
+class S3ArtifactStore(BaseArtifactStore):
     def __init__(
             self,
             *,
