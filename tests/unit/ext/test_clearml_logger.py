@@ -10,6 +10,8 @@ from saltai.engine.event_bus.bus import EventBus
 from saltai.utils.typing.core import ArtifactId, ArtifactRef, MetricPoint, RunId
 from saltai.utils.typing.events import ArtifactSaved, CheckpointSaved, MetricLogged, RunStarted
 from saltai.integrations.clearml import ClearMLLogger, ClearMLNotInstalledError
+from saltai.logging.filters import EventTypeFilter, FilteredLogger
+
 
 class FakeClearMLInnerLogger(object):
     def __init__(self):
@@ -46,21 +48,6 @@ class FakeClearMLTask(object):
 
     def close(self):
         self.closed = True
-
-
-class _HelperEventsOnlySink(object):
-    def __init__(self, inner):
-        self.inner = inner
-
-    def log(self, event):
-        if type(event).__name__ in {"MetricLogged", "ArtifactSaved"}:
-            self.inner.log(event)
-
-    def flush(self):
-        self.inner.flush()
-
-    def close(self):
-        return None
 
 
 class TestClearMLLogger(unittest.TestCase):
@@ -174,7 +161,12 @@ class TestClearMLLogger(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             task = FakeClearMLTask()
             lg = ClearMLLogger(task=task)
-            bus = EventBus([_HelperEventsOnlySink(lg)])
+            bus = EventBus([
+                FilteredLogger(
+                    lg,
+                    EventTypeFilter(include={"metric", "artifact_saved"}),
+                )
+            ])
 
             src = os.path.join(d, "manual.txt")
             with open(src, "w", encoding="utf-8") as f:
