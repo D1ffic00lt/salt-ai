@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from saltai import errors
 from saltai import events
-from saltai.artifacts.store import LocalArtifactStore
+from saltai.artifacts.store import BaseArtifactStore, LocalArtifactStore
 from saltai.engine.event_bus.bus import EventBus
 from saltai.engine.runner.runner import Runner, RunContext, RunIO
 from saltai.engine.trainer.trainer import Trainer
@@ -31,6 +31,7 @@ __all__ = (
     "EventBus",
     "BaseLogger",
     "NoOpLogger",
+    "BaseArtifactStore",
     "LocalArtifactStore",
     "RunRegistry",
     "RunRecord",
