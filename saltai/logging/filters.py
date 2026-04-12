@@ -1,10 +1,43 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from typing import Final, Callable, Mapping
 
 from saltai.utils.typing.core import Logger
+from saltai.utils.typing.events import EventType
 
 EventFilter = Callable[[object], bool]
+
+
+def _event_types(*events: EventType) -> frozenset[EventType]:
+    return frozenset(events)
+
+
+CORE_LIFECYCLE_EVENTS: Final[frozenset[EventType]] = _event_types(
+    "run_started",
+    "run_finished",
+    "run_failed",
+    "stage_started",
+    "stage_finished",
+)
+
+PROGRESS_EVENTS: Final[frozenset[EventType]] = _event_types(
+    "epoch_started",
+    "epoch_finished",
+    "step_started",
+    "step_finished",
+)
+
+OUTPUT_EVENTS: Final[frozenset[EventType]] = _event_types(
+    "metric",
+    "artifact_saved",
+    "checkpoint_saved",
+)
+
+CLEARML_DEFAULT_EVENTS: Final[frozenset[EventType]] = _event_types(
+    "metric",
+    "artifact_saved",
+    "checkpoint_saved",
+)
 
 
 def _event_type(event: object) -> str | None:
