@@ -85,17 +85,25 @@ class CloudRunLogger(object):
             return
 
         if event_type == "run_failed":
-            self._failed = True
-            self._log_event(event_type, "error", "Run failed", payload, timestamp)
-            self.client.fail_run(self.run_id)
+            if not self._failed:
+                self._log_event(event_type, "error", "Run failed", payload, timestamp)
+                self.client.fail_run(self.run_id)
+                self._failed = True
             return
 
         if event_type == "run_finished":
             status = _event_data(event).get("status")
-            level = "error" if status == "failed" else "info"
-            self._log_event(event_type, level, "Run finished", payload, timestamp)
 
-            if status != "failed" and not self._failed and not self._finished:
+            if status == "failed":
+                if not self._failed:
+                    self._log_event(event_type, "error", "Run finished", payload, timestamp)
+                    self.client.fail_run(self.run_id)
+                    self._failed = True
+                return
+
+            self._log_event(event_type, "info", "Run finished", payload, timestamp)
+
+            if not self._finished:
                 self.client.finish_run(self.run_id)
                 self._finished = True
 
