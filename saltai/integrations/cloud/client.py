@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import hashlib
 import json
-import mimetypes
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Mapping
@@ -33,12 +31,12 @@ def _json_default(value: Any) -> Any:
     return str(value)
 
 
-def _sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
+def _quote_id(value: object) -> str:
+    return quote(str(value), safe="")
+
+
+def _drop_none(payload: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in payload.items() if value is not None}
 
 
 class CloudClient:
@@ -58,7 +56,7 @@ class CloudClient:
 
         self.base_url = base_url.rstrip("/")
         self.api_token = api_token
-        self.api_prefix = "/" + api_prefix.strip("/")
+        self.api_prefix = "/" + api_prefix.strip("/") if api_prefix else ""
         self.timeout = float(timeout)
         self.headers = dict(headers or {})
 
@@ -76,7 +74,7 @@ class CloudClient:
     ) -> dict[str, Any]:
         return self._request(
             "POST",
-            f"/projects/{quote(str(project_id))}/runs",
+            f"/projects/{_quote_id(project_id)}/runs",
             {
                 "name": name,
                 "config": config or {},
@@ -86,7 +84,7 @@ class CloudClient:
         )
 
     def get_run(self, run_id: str) -> dict[str, Any]:
-        return self._request("GET", f"/runs/{quote(str(run_id))}")
+        return self._request("GET", f"/runs/{_quote_id(run_id)}")
 
     def update_run(
             self,
@@ -97,22 +95,22 @@ class CloudClient:
             manifest: dict[str, Any] | None = None,
             tags: list[str] | None = None,
     ) -> dict[str, Any]:
-        return self._request(
-            "PATCH",
-            f"/runs/{quote(str(run_id))}",
+        payload = _drop_none(
             {
                 "name": name,
                 "config": config,
                 "manifest": manifest,
                 "tags": tags,
-            },
+            }
         )
 
+        return self._request("PATCH", f"/runs/{_quote_id(run_id)}", payload)
+
     def finish_run(self, run_id: str) -> dict[str, Any]:
-        return self._request("POST", f"/runs/{quote(str(run_id))}/finish")
+        return self._request("POST", f"/runs/{_quote_id(run_id)}/finish")
 
     def fail_run(self, run_id: str) -> dict[str, Any]:
-        return self._request("POST", f"/runs/{quote(str(run_id))}/fail")
+        return self._request("POST", f"/runs/{_quote_id(run_id)}/fail")
 
     def log_metric(
             self,
@@ -126,7 +124,7 @@ class CloudClient:
     ) -> dict[str, Any]:
         return self._request(
             "POST",
-            f"/runs/{quote(str(run_id))}/metrics",
+            f"/runs/{_quote_id(run_id)}/metrics",
             {
                 "key": key,
                 "value": float(value),
@@ -137,7 +135,7 @@ class CloudClient:
         )
 
     def list_metrics(self, run_id: str) -> list[dict[str, Any]]:
-        return self._request("GET", f"/runs/{quote(str(run_id))}/metrics")
+        return self._request("GET", f"/runs/{_quote_id(run_id)}/metrics")
 
     def log_event(
             self,
@@ -151,7 +149,7 @@ class CloudClient:
     ) -> dict[str, Any]:
         return self._request(
             "POST",
-            f"/runs/{quote(str(run_id))}/events",
+            f"/runs/{_quote_id(run_id)}/events",
             {
                 "type": type,
                 "level": level,
@@ -162,7 +160,7 @@ class CloudClient:
         )
 
     def list_events(self, run_id: str) -> list[dict[str, Any]]:
-        return self._request("GET", f"/runs/{quote(str(run_id))}/events")
+        return self._request("GET", f"/runs/{_quote_id(run_id)}/events")
 
     def create_artifact(
             self,
@@ -177,7 +175,7 @@ class CloudClient:
     ) -> dict[str, Any]:
         return self._request(
             "POST",
-            f"/runs/{quote(str(run_id))}/artifacts",
+            f"/runs/{_quote_id(run_id)}/artifacts",
             {
                 "name": name,
                 "kind": kind,
@@ -200,7 +198,7 @@ class CloudClient:
     ) -> dict[str, Any]:
         return self._request(
             "POST",
-            f"/artifacts/{quote(str(artifact_id))}/complete",
+            f"/artifacts/{_quote_id(artifact_id)}/complete",
             {
                 "storage_uri": storage_uri,
                 "size_bytes": size_bytes,
@@ -210,57 +208,14 @@ class CloudClient:
             },
         )
 
-    def create_local_artifact(
-            self,
-            run_id: str,
-            path: str | Path,
-            *,
-            name: str | None = None,
-            kind: str = "other",
-            content_type: str | None = None,
-            meta: dict[str, Any] | None = None,
-            complete: bool = True,
-    ) -> dict[str, Any]:
-        local_path = Path(path)
-        if not local_path.is_file():
-            raise CloudClientError(f"Artifact file not found: {local_path}")
-
-        artifact_name = name or local_path.name
-        artifact_hash = _sha256_file(local_path)
-        artifact_size = local_path.stat().st_size
-        artifact_content_type = content_type or mimetypes.guess_type(str(local_path))[0]
-
-        artifact = self.create_artifact(
-            run_id,
-            artifact_name,
-            kind=kind,
-            size_bytes=artifact_size,
-            content_type=artifact_content_type,
-            hash=artifact_hash,
-            meta=meta,
-        )
-
-        if not complete:
-            return artifact
-
-        artifact_id = artifact["id"]
-        return self.complete_artifact(
-            artifact_id,
-            storage_uri=f"file://{local_path.resolve()}",
-            size_bytes=artifact_size,
-            content_type=artifact_content_type,
-            hash=artifact_hash,
-            meta=meta,
-        )
-
     def list_artifacts(self, run_id: str) -> list[dict[str, Any]]:
-        return self._request("GET", f"/runs/{quote(str(run_id))}/artifacts")
+        return self._request("GET", f"/runs/{_quote_id(run_id)}/artifacts")
 
     def get_artifact(self, artifact_id: str) -> dict[str, Any]:
-        return self._request("GET", f"/artifacts/{quote(str(artifact_id))}")
+        return self._request("GET", f"/artifacts/{_quote_id(artifact_id)}")
 
     def get_artifact_download_reference(self, artifact_id: str) -> dict[str, Any]:
-        return self._request("GET", f"/artifacts/{quote(str(artifact_id))}/download")
+        return self._request("GET", f"/artifacts/{_quote_id(artifact_id)}/download")
 
     def _request(
             self,
@@ -268,7 +223,6 @@ class CloudClient:
             path: str,
             payload: dict[str, Any] | None = None,
     ) -> Any:
-        url = self._url(path)
         body = None
 
         if payload is not None:
@@ -286,10 +240,10 @@ class CloudClient:
         }
 
         if body is not None:
-            headers["Content-Type"] = "application/json"
+            headers.setdefault("Content-Type", "application/json")
 
         request = Request(
-            url,
+            self._url(path),
             data=body,
             headers=headers,
             method=method.upper(),
@@ -313,6 +267,7 @@ class CloudClient:
             data = e.read()
             parsed = self._parse_response(data)
             raise CloudApiError(e.code, self._extract_detail(parsed), parsed) from e
+
         except URLError as e:
             raise CloudClientError(f"SaltAI Cloud request failed: {e.reason}") from e
 
@@ -325,6 +280,7 @@ class CloudClient:
             return {}
 
         text = data.decode("utf-8", errors="replace")
+
         try:
             return json.loads(text)
         except json.JSONDecodeError:
@@ -335,3 +291,10 @@ class CloudClient:
         if isinstance(body, dict):
             return body.get("detail", body)
         return body
+
+
+__all__ = (
+    "CloudClient",
+    "CloudClientError",
+    "CloudApiError",
+)
