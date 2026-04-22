@@ -1520,9 +1520,10 @@ typing-extensions = {version = ">=4.13.2", markers = "python_version < \"3.11\""
 [extras]
 all = ["boto3", "clearml"]
 clearml = ["clearml"]
+cloud = []
 s3 = ["boto3"]
 
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<3.13"
-content-hash = "65d1b147825ec6fd2c935fd36bececfe36adc276c8e0ab32e0803f47b8fabaf2"
+content-hash = "10d815785d68cb052200481dad14c8ec8b5a1b86dc5aff85858ea6891469409b"
