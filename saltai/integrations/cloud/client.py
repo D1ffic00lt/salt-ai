@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import mimetypes
+import uuid
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Mapping
@@ -9,6 +11,12 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from saltai.logging.utils.jsonable import to_jsonable
+
+__all__ = (
+    "CloudClient",
+    "CloudClientError",
+    "CloudApiError",
+)
 
 
 class CloudClientError(RuntimeError):
@@ -37,6 +45,26 @@ def _quote_id(value: object) -> str:
 
 def _drop_none(payload: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in payload.items() if value is not None}
+
+
+def _multipart_file_body(
+        *,
+        boundary: str,
+        field_name: str,
+        filename: str,
+        content_type: str,
+        data: bytes,
+) -> bytes:
+    head = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="{field_name}"; filename="{filename}"\r\n'
+        f"Content-Type: {content_type}\r\n"
+        "\r\n"
+    ).encode("utf-8")
+
+    tail = f"\r\n--{boundary}--\r\n".encode("utf-8")
+
+    return head + data + tail
 
 
 class CloudClient:
@@ -208,6 +236,38 @@ class CloudClient:
             },
         )
 
+    def upload_artifact_file(
+            self,
+            artifact_id: str,
+            local_path: str | Path,
+            *,
+            field_name: str = "file",
+    ) -> dict[str, Any]:
+        path = Path(local_path).expanduser().resolve()
+
+        if not path.exists():
+            raise CloudClientError(f"Artifact file not found: {path}")
+        if not path.is_file():
+            raise CloudClientError(f"Artifact path is not a file: {path}")
+
+        boundary = f"saltai-{uuid.uuid4().hex}"
+        content_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+
+        body = _multipart_file_body(
+            boundary=boundary,
+            field_name=field_name,
+            filename=path.name,
+            content_type=content_type,
+            data=path.read_bytes(),
+        )
+
+        return self._request_bytes(
+            "POST",
+            f"/artifacts/{_quote_id(artifact_id)}/upload",
+            body,
+            content_type=f"multipart/form-data; boundary={boundary}",
+        )
+
     def list_artifacts(self, run_id: str) -> list[dict[str, Any]]:
         return self._request("GET", f"/runs/{_quote_id(run_id)}/artifacts")
 
@@ -216,6 +276,19 @@ class CloudClient:
 
     def get_artifact_download_reference(self, artifact_id: str) -> dict[str, Any]:
         return self._request("GET", f"/artifacts/{_quote_id(artifact_id)}/download")
+
+    def download_artifact_content(
+            self,
+            artifact_id: str,
+            dst_path: str | Path,
+    ) -> str:
+        dst = Path(dst_path).expanduser().resolve()
+        dst.parent.mkdir(parents=True, exist_ok=True)
+
+        data = self._request_raw("GET", f"/artifacts/{_quote_id(artifact_id)}/content")
+        dst.write_bytes(data)
+
+        return str(dst)
 
     def _request(
             self,
@@ -271,6 +344,85 @@ class CloudClient:
         except URLError as e:
             raise CloudClientError(f"SaltAI Cloud request failed: {e.reason}") from e
 
+    def _request_bytes(
+            self,
+            method: str,
+            path: str,
+            body: bytes,
+            *,
+            content_type: str,
+    ) -> Any:
+        headers = {
+            "Accept": "application/json",
+            "Authorization": f"Bearer {self.api_token}",
+            "Content-Type": content_type,
+            **self.headers,
+        }
+
+        request = Request(
+            self._url(path),
+            data=body,
+            headers=headers,
+            method=method.upper(),
+        )
+
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                status = int(getattr(response, "status", response.getcode()))
+                data = response.read()
+
+                if status < 200 or status >= 300:
+                    parsed = self._parse_response(data)
+                    raise CloudApiError(status, self._extract_detail(parsed), parsed)
+
+                if not data:
+                    return {}
+
+                return self._parse_response(data)
+
+        except HTTPError as e:
+            data = e.read()
+            parsed = self._parse_response(data)
+            raise CloudApiError(e.code, self._extract_detail(parsed), parsed) from e
+
+        except URLError as e:
+            raise CloudClientError(f"SaltAI Cloud request failed: {e.reason}") from e
+
+    def _request_raw(
+            self,
+            method: str,
+            path: str,
+    ) -> bytes:
+        headers = {
+            "Authorization": f"Bearer {self.api_token}",
+            **self.headers,
+        }
+
+        request = Request(
+            self._url(path),
+            headers=headers,
+            method=method.upper(),
+        )
+
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                status = int(getattr(response, "status", response.getcode()))
+                data = response.read()
+
+                if status < 200 or status >= 300:
+                    parsed = self._parse_response(data)
+                    raise CloudApiError(status, self._extract_detail(parsed), parsed)
+
+                return data
+
+        except HTTPError as e:
+            data = e.read()
+            parsed = self._parse_response(data)
+            raise CloudApiError(e.code, self._extract_detail(parsed), parsed) from e
+
+        except URLError as e:
+            raise CloudClientError(f"SaltAI Cloud request failed: {e.reason}") from e
+
     def _url(self, path: str) -> str:
         return f"{self.base_url}{self.api_prefix}/{path.lstrip('/')}"
 
@@ -291,10 +443,3 @@ class CloudClient:
         if isinstance(body, dict):
             return body.get("detail", body)
         return body
-
-
-__all__ = (
-    "CloudClient",
-    "CloudClientError",
-    "CloudApiError",
-)
