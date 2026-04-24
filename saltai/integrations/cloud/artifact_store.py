@@ -32,6 +32,7 @@ class CloudArtifactStore(object):
             client: CloudClient,
             run_id: str,
             storage_uri_builder: StorageUriBuilder | None = None,
+            upload_files: bool = False,
     ):
         if not run_id:
             raise ValueError("run_id is required")
@@ -39,6 +40,7 @@ class CloudArtifactStore(object):
         self.client = client
         self.run_id = str(run_id)
         self.storage_uri_builder = storage_uri_builder or _default_storage_uri
+        self.upload_files = bool(upload_files)
 
     def put(
             self,
@@ -67,11 +69,12 @@ class CloudArtifactStore(object):
         sha256 = _sha256_file(path)
         content_type = mimetypes.guess_type(str(path))[0]
 
+        storage_mode = "local_upload" if self.upload_files else "metadata_only"
         base_meta = _json_object(meta)
         request_meta = {
             **base_meta,
             "local_path": str(path),
-            "storage_mode": "metadata_only",
+            "storage_mode": storage_mode,
         }
 
         artifact = self.client.create_artifact(
@@ -83,6 +86,21 @@ class CloudArtifactStore(object):
             hash=sha256,
             meta=request_meta,
         )
+
+        if self.upload_files:
+            uploaded = self.client.upload_artifact_file(str(artifact["id"]), path)
+            payload = _merge_artifact_payloads(artifact, uploaded)
+
+            return _artifact_ref_from_payload(
+                payload,
+                fallback_id=str(artifact["id"]),
+                fallback_kind=kind_s,
+                fallback_name=name_s,
+                fallback_uri=str(uploaded.get("storage_uri") or artifact.get("storage_uri") or ""),
+                fallback_sha256=uploaded.get("hash") or sha256,
+                fallback_size_bytes=uploaded.get("size_bytes") or size_bytes,
+                fallback_meta=request_meta,
+            )
 
         storage_uri = self.storage_uri_builder(path, kind_s, name_s, artifact)
 
@@ -112,24 +130,23 @@ class CloudArtifactStore(object):
         payload = self.client.get_artifact(str(ref.id))
         storage_uri = str(payload.get("storage_uri") or payload.get("uri") or ref.uri)
 
+        dst_root = Path(dst_dir).expanduser().resolve()
+        dst_root.mkdir(parents=True, exist_ok=True)
+
         if storage_uri.startswith("file://"):
             src = Path(storage_uri[7:]).expanduser().resolve()
-            if not src.exists():
-                raise CloudArtifactStoreError(f"Cloud artifact local file does not exist: {src}")
+            if src.exists() and src.is_file():
+                dst = dst_root / src.name
+                shutil.copy2(src, dst)
+                return str(dst)
 
-            dst_root = Path(dst_dir).expanduser().resolve()
-            dst_root.mkdir(parents=True, exist_ok=True)
+        name = str(payload.get("name") or ref.name or ref.id)
+        dst = dst_root / Path(name).name
 
-            dst = dst_root / src.name
-            shutil.copy2(src, dst)
-            return str(dst)
+        data = self.client.download_artifact_content(str(ref.id))
+        dst.write_bytes(data)
 
-        download_ref = self.client.get_artifact_download_reference(str(ref.id))
-
-        raise CloudArtifactStoreError(
-            "Cloud artifact download is not implemented for non-local storage yet: "
-            f"artifact_id={ref.id}, storage_uri={storage_uri}, download_reference={download_ref}"
-        )
+        return str(dst)
 
     def exists(self, ref: ArtifactRef) -> bool:
         try:
