@@ -7,7 +7,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 from saltai.logging.utils.jsonable import to_jsonable
@@ -47,6 +47,14 @@ def _drop_none(payload: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in payload.items() if value is not None}
 
 
+def _path_with_query(path: str, query: dict[str, Any] | None = None) -> str:
+    clean_query = _drop_none(dict(query or {}))
+    if not clean_query:
+        return path
+
+    return f"{path}?{urlencode(clean_query)}"
+
+
 class CloudClient:
     def __init__(
             self,
@@ -71,6 +79,49 @@ class CloudClient:
     def auth_me(self) -> dict[str, Any]:
         return self._request("GET", "/auth/me")
 
+    def get_workspace(self, workspace_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/workspaces/{_quote_id(workspace_id)}")
+
+    def get_workspace_details(self, workspace_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/workspaces/{_quote_id(workspace_id)}/details")
+
+    def get_workspace_overview(
+            self,
+            workspace_id: str,
+            *,
+            recent_runs_limit: int | None = None,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            _path_with_query(
+                f"/workspaces/{_quote_id(workspace_id)}/overview",
+                {"recent_runs_limit": recent_runs_limit},
+            ),
+        )
+
+    def get_project(self, project_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/projects/{_quote_id(project_id)}")
+
+    def get_project_details(self, project_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/projects/{_quote_id(project_id)}/details")
+
+    def get_project_overview(
+            self,
+            project_id: str,
+            *,
+            recent_runs_limit: int | None = None,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            _path_with_query(
+                f"/projects/{_quote_id(project_id)}/overview",
+                {"recent_runs_limit": recent_runs_limit},
+            ),
+        )
+
+    def list_project_runs(self, project_id: str) -> list[dict[str, Any]]:
+        return self._request("GET", f"/projects/{_quote_id(project_id)}/runs")
+
     def create_run(
             self,
             project_id: str,
@@ -93,6 +144,9 @@ class CloudClient:
 
     def get_run(self, run_id: str) -> dict[str, Any]:
         return self._request("GET", f"/runs/{_quote_id(run_id)}")
+
+    def get_run_details(self, run_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/runs/{_quote_id(run_id)}/details")
 
     def update_run(
             self,
@@ -216,6 +270,54 @@ class CloudClient:
             },
         )
 
+    def upload_artifact_file(
+            self,
+            artifact_id: str,
+            local_path: str | Path,
+            *,
+            filename: str | None = None,
+            content_type: str | None = None,
+    ) -> dict[str, Any]:
+        path = Path(local_path).expanduser().resolve()
+
+        if not path.exists():
+            raise CloudClientError(f"Artifact file not found: {path}")
+        if not path.is_file():
+            raise CloudClientError(f"Artifact path is not a file: {path}")
+
+        file_name = filename or path.name
+        file_content_type = content_type or mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+
+        return self.upload_artifact_bytes(
+            artifact_id,
+            path.read_bytes(),
+            filename=file_name,
+            content_type=file_content_type,
+        )
+
+    def upload_artifact_bytes(
+            self,
+            artifact_id: str,
+            content: bytes,
+            *,
+            filename: str,
+            content_type: str = "application/octet-stream",
+    ) -> dict[str, Any]:
+        body, body_content_type = self._multipart_body(
+            field_name="file",
+            filename=filename,
+            content=content,
+            content_type=content_type,
+        )
+
+        return self._request_raw(
+            "POST",
+            f"/artifacts/{_quote_id(artifact_id)}/upload",
+            body=body,
+            content_type=body_content_type,
+            parse_json=True,
+        )
+
     def list_artifacts(self, run_id: str) -> list[dict[str, Any]]:
         return self._request("GET", f"/runs/{_quote_id(run_id)}/artifacts")
 
@@ -225,31 +327,22 @@ class CloudClient:
     def get_artifact_download_reference(self, artifact_id: str) -> dict[str, Any]:
         return self._request("GET", f"/artifacts/{_quote_id(artifact_id)}/download")
 
-    def upload_artifact_file(
-            self,
-            artifact_id: str,
-            local_path: str | Path,
-    ) -> dict[str, Any]:
-        path = Path(local_path).expanduser().resolve()
-
-        if not path.exists():
-            raise CloudClientError(f"Artifact file not found: {path}")
-        if not path.is_file():
-            raise CloudClientError(f"Artifact path is not a file: {path}")
-
-        body, content_type = self._multipart_file_body(path)
-
+    def download_artifact_content(self, artifact_id: str) -> bytes:
         return self._request_raw(
-            "POST",
-            f"/artifacts/{_quote_id(artifact_id)}/upload",
-            body=body,
-            content_type=content_type,
-            accept="application/json",
-            parse_json=True,
+            "GET",
+            f"/artifacts/{_quote_id(artifact_id)}/content",
+            parse_json=False,
         )
 
-    def download_artifact_content(self, artifact_id: str) -> bytes:
-        return self._request_bytes("GET", f"/artifacts/{_quote_id(artifact_id)}/content")
+    def save_artifact_content(
+            self,
+            artifact_id: str,
+            dst_path: str | Path,
+    ) -> str:
+        path = Path(dst_path).expanduser().resolve()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(self.download_artifact_content(artifact_id))
+        return str(path)
 
     def _request(
             self,
@@ -267,31 +360,12 @@ class CloudClient:
                 separators=(",", ":"),
             ).encode("utf-8")
 
-        content_type = "application/json" if body is not None else None
-
         return self._request_raw(
             method,
             path,
             body=body,
-            content_type=content_type,
-            accept="application/json",
+            content_type="application/json" if body is not None else None,
             parse_json=True,
-        )
-
-    def _request_bytes(
-            self,
-            method: str,
-            path: str,
-            body: bytes | None = None,
-            content_type: str | None = None,
-    ) -> bytes:
-        return self._request_raw(
-            method,
-            path,
-            body=body,
-            content_type=content_type,
-            accept="application/octet-stream",
-            parse_json=False,
         )
 
     def _request_raw(
@@ -301,17 +375,16 @@ class CloudClient:
             *,
             body: bytes | None = None,
             content_type: str | None = None,
-            accept: str = "application/json",
-            parse_json: bool = True,
+            parse_json: bool,
     ) -> Any:
         headers = {
-            "Accept": accept,
+            "Accept": "application/json" if parse_json else "*/*",
             "Authorization": f"Bearer {self.api_token}",
             **self.headers,
         }
 
         if content_type is not None:
-            headers["Content-Type"] = content_type
+            headers.setdefault("Content-Type", content_type)
 
         request = Request(
             self._url(path),
@@ -345,24 +418,33 @@ class CloudClient:
         except URLError as e:
             raise CloudClientError(f"SaltAI Cloud request failed: {e.reason}") from e
 
-    def _multipart_file_body(self, path: Path) -> tuple[bytes, str]:
-        boundary = f"----saltai-cloud-{uuid.uuid4().hex}"
-        content_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
-        filename = path.name
-
-        header = (
-            f"--{boundary}\r\n"
-            f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
-            f"Content-Type: {content_type}\r\n"
-            "\r\n"
-        ).encode("utf-8")
-
-        footer = f"\r\n--{boundary}--\r\n".encode("utf-8")
-
-        return header + path.read_bytes() + footer, f"multipart/form-data; boundary={boundary}"
-
     def _url(self, path: str) -> str:
         return f"{self.base_url}{self.api_prefix}/{path.lstrip('/')}"
+
+    @staticmethod
+    def _multipart_body(
+            *,
+            field_name: str,
+            filename: str,
+            content: bytes,
+            content_type: str,
+    ) -> tuple[bytes, str]:
+        boundary = f"saltai-{uuid.uuid4().hex}"
+        safe_filename = filename.replace('"', "%22")
+
+        chunks = [
+            f"--{boundary}\r\n".encode("utf-8"),
+            (
+                f'Content-Disposition: form-data; name="{field_name}"; '
+                f'filename="{safe_filename}"\r\n'
+            ).encode("utf-8"),
+            f"Content-Type: {content_type}\r\n\r\n".encode("utf-8"),
+            content,
+            b"\r\n",
+            f"--{boundary}--\r\n".encode("utf-8"),
+        ]
+
+        return b"".join(chunks), f"multipart/form-data; boundary={boundary}"
 
     @staticmethod
     def _parse_response(data: bytes) -> Any:
