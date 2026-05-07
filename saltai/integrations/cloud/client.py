@@ -85,6 +85,19 @@ class CloudClient:
     def get_workspace_details(self, workspace_id: str) -> dict[str, Any]:
         return self._request("GET", f"/workspaces/{_quote_id(workspace_id)}/details")
 
+    def get_current_workspace_overview(
+            self,
+            *,
+            recent_runs_limit: int | None = None,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            _path_with_query(
+                "/overview",
+                {"recent_runs_limit": recent_runs_limit},
+            ),
+        )
+
     def get_workspace_overview(
             self,
             workspace_id: str,
