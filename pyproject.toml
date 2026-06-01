@@ -9,12 +9,20 @@ keywords = ["salt", "ai", "machine-learning"]
 repository = "https://github.com/D1ffic00lt/salt-ai"
 
 packages = [
-  { include = "saltai" },
-  { include = "saltai_ext" },
+    { include = "saltai" },
 ]
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.13"
+pandas = ">=2.0"
+clearml = { version = ">=1.16", optional = true }
+boto3 = { version = ">=1.34", optional = true }
+
+[tool.poetry.extras]
+clearml = ["clearml"]
+s3 = ["boto3"]
+cloud = []
+all = ["clearml", "boto3"]
 
 [tool.poetry.urls]
 "Bug Tracker" = "https://github.com/D1ffic00lt/salt-ai/issues"
@@ -26,3 +34,6 @@ black = "^26.1.0"
 [build-system]
 requires = ["poetry-core>=1.9.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+saltai = "saltai.cli.main:main"

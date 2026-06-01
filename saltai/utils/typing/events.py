@@ -11,6 +11,7 @@ __all__ = (
     "BaseEvent",
     "RunStarted",
     "RunFinished",
+    "RunFailed",
     "StageStarted",
     "StageFinished",
     "EpochStarted",
@@ -26,6 +27,7 @@ __all__ = (
 EventType = Literal[
     "run_started",
     "run_finished",
+    "run_failed",
     "stage_started",
     "stage_finished",
     "epoch_started",
@@ -55,6 +57,11 @@ class RunStarted(BaseEvent):
 @dataclass(frozen=True, slots=True)
 class RunFinished(BaseEvent):
     type: Literal["run_finished"]
+
+
+@dataclass(frozen=True, slots=True)
+class RunFailed(BaseEvent):
+    type: Literal["run_failed"]
 
 
 @dataclass(frozen=True, slots=True)

@@ -6,6 +6,8 @@ import shutil
 import uuid
 from pathlib import Path
 
+from saltai.artifacts.refs import artifact_local_path, make_artifact_ref, validate_artifact_key
+from saltai.artifacts.store.base import BaseArtifactStore
 from saltai.utils.errors.base import ArtifactError
 from saltai.utils.errors.codes import EC
 from saltai.utils.typing.core import ArtifactId, ArtifactRef
@@ -20,32 +22,40 @@ def _sha256_file(path: str) -> str:
     return h.hexdigest()
 
 
-def _strip_file_uri(uri: str) -> str:
-    return uri[7:] if uri.startswith("file://") else uri
+def _parse_stored_artifact_filename(filename: str) -> tuple[str, ArtifactId]:
+    if "__" not in filename:
+        return Path(filename).stem, ArtifactId("")
+
+    name, artifact_part = filename.rsplit("__", 1)
+    artifact_id = Path(artifact_part).stem
+    return name, ArtifactId(artifact_id)
 
 
-class LocalArtifactStore(object):
+class LocalArtifactStore(BaseArtifactStore):
     def __init__(self, root: str):
         self.root = str(root)
         Path(self.root).mkdir(parents=True, exist_ok=True)
 
     def put(self, local_path: str, *, kind: str, name: str, meta: JSONObject | None = None) -> ArtifactRef:
-        if not os.path.exists(local_path):
+        kind, name = validate_artifact_key(kind=kind, name=name)
+        src = str(local_path)
+
+        if not os.path.isfile(src):
             raise ArtifactError(
                 EC.ARTIFACT_NOT_FOUND,
                 "Local artifact file not found",
                 hint="Check the path you pass to put()",
-                context={"path": local_path, "kind": kind, "name": name},
+                context={"path": src, "kind": kind, "name": name},
             )
 
         aid = ArtifactId(uuid.uuid4().hex)
-        ext = Path(local_path).suffix
+        ext = Path(src).suffix
         dst_dir = os.path.join(self.root, kind)
         os.makedirs(dst_dir, exist_ok=True)
         dst = os.path.join(dst_dir, f"{name}__{aid}{ext}")
 
         try:
-            shutil.copy2(local_path, dst)
+            shutil.copy2(src, dst)
             size = os.path.getsize(dst)
             sha = _sha256_file(dst)
         except BaseException as e:
@@ -53,11 +63,11 @@ class LocalArtifactStore(object):
                 EC.ARTIFACT_WRITE_FAILED,
                 "Failed to store artifact",
                 hint="Check filesystem permissions and free space",
-                context={"src": local_path, "dst": dst, "kind": kind, "name": name},
+                context={"src": src, "dst": dst, "kind": kind, "name": name},
                 cause=e,
             ) from e
 
-        return ArtifactRef(
+        return make_artifact_ref(
             id=aid,
             kind=kind,
             name=name,
@@ -68,11 +78,13 @@ class LocalArtifactStore(object):
         )
 
     def exists(self, ref: ArtifactRef) -> bool:
-        return os.path.exists(_strip_file_uri(ref.uri))
+        try:
+            return os.path.exists(artifact_local_path(ref))
+        except ArtifactError:
+            return False
 
-    @staticmethod
-    def get(ref: ArtifactRef, *, dst_dir: str) -> str:
-        src = _strip_file_uri(ref.uri)
+    def get(self, ref: ArtifactRef, *, dst_dir: str) -> str:
+        src = artifact_local_path(ref)
         if not os.path.exists(src):
             raise ArtifactError(
                 EC.ARTIFACT_NOT_FOUND,
@@ -96,6 +108,9 @@ class LocalArtifactStore(object):
         return dst
 
     def list(self, *, kind: str | None = None):
+        if kind is not None:
+            kind, _ = validate_artifact_key(kind=kind, name="_")
+
         base = os.path.join(self.root, kind) if kind else self.root
         if not os.path.exists(base):
             return []
@@ -113,10 +128,10 @@ class LocalArtifactStore(object):
                 else:
                     k = kind
 
-                name = fn.split("__", 1)[0]
+                name, aid = _parse_stored_artifact_filename(fn)
                 out.append(
                     ArtifactRef(
-                        id=ArtifactId(""),
+                        id=aid,
                         kind=k,
                         name=name,
                         uri=f"file://{path}",

@@ -15,8 +15,27 @@ from saltai.manifest.model.run import RunManifest
 from saltai.utils.errors.base import SaltAIError, CheckpointError
 from saltai.utils.errors.codes import EC
 from saltai.utils.errors.helpers import wrap_unknown
-from saltai.utils.typing.core import ArtifactRef, Checkpointable, MetricSummary, RunId, RunResult
-from saltai.utils.typing.events import RunStarted, RunFinished, StageStarted, StageFinished, CheckpointSaved
+from saltai.utils.typing.core import (
+    ArtifactRef,
+    ArtifactStore,
+    Checkpointable,
+    MetricPoint,
+    MetricSummary,
+    RunId,
+    RunResult,
+)
+from saltai.utils.typing.events import (
+    ArtifactSaved,
+    CheckpointSaved,
+    MetricLogged,
+    RunFailed,
+    RunFinished,
+    RunStarted,
+    StageFinished,
+    StageStarted,
+)
+
+ArtifactStoreFactory = Callable[[str], ArtifactStore]
 
 
 class RunIO(object):
@@ -35,14 +54,14 @@ class RunIO(object):
     )
 
     def __init__(
-        self,
-        *,
-        run_id: RunId,
-        run_dir: str,
-        config_hash: str,
-        bus: EventBus,
-        store: LocalArtifactStore,
-        ckpt: CheckpointManager | None,
+            self,
+            *,
+            run_id: RunId,
+            run_dir: str,
+            config_hash: str,
+            bus: EventBus,
+            store: ArtifactStore,
+            ckpt: CheckpointManager | None,
     ):
         self.run_id = run_id
         self.run_dir = run_dir
@@ -60,6 +79,56 @@ class RunIO(object):
 
     def publish(self, ev: object) -> None:
         self.bus.publish(ev, context={"run_id": str(self.run_id), "run_dir": self.run_dir})
+
+    def log_metric(
+            self,
+            name: str,
+            value: float | int,
+            *,
+            step: int | None = None,
+            epoch: int | None = None,
+            split: str | None = None,
+            extra: dict[str, Any] | None = None,
+    ) -> MetricPoint:
+        point = MetricPoint(
+            name=str(name),
+            value=value,
+            step=step,
+            epoch=epoch,
+            split=split,
+            extra=extra or {},
+        )
+        self.publish(
+            MetricLogged(
+                type="metric",
+                run_id=self.run_id,
+                ts=time.time(),
+                data={},
+                point=point,
+            )
+        )
+        return point
+
+    def save_artifact(
+            self,
+            local_path: str,
+            *,
+            kind: str,
+            name: str,
+            meta: dict[str, Any] | None = None,
+    ) -> ArtifactRef:
+        ref = self.store.put(local_path, kind=kind, name=name, meta=meta or {})
+        self.artifacts.append(ref)
+        self.publish(
+            ArtifactSaved(
+                type="artifact_saved",
+                run_id=self.run_id,
+                ts=time.time(),
+                data={},
+                ref=ref,
+            )
+        )
+        return ref
 
     def save_latest(self, obj: Checkpointable, *, step: int) -> ArtifactRef:
         if self.ckpt is None:
@@ -118,28 +187,43 @@ class RunContext(object):
     io: RunIO
 
 
+def _metrics_from_body_result(value: Any) -> MetricSummary:
+    if value is None:
+        return MetricSummary(values={}, extra={})
+
+    if isinstance(value, MetricSummary):
+        return value
+
+    if isinstance(value, dict):
+        return MetricSummary(values=value, extra={})
+
+    return MetricSummary(values={}, extra={"body_result_type": type(value).__name__})
+
+
 class Runner(object):
     def __init__(
-        self,
-        *,
-        event_bus: EventBus | None = None,
-        record_events: bool = False,
-        store_artifacts: bool = False,
-        enable_checkpoints: bool = False,
-        checkpoint_keep_last: int = 3,
+            self,
+            *,
+            event_bus: EventBus | None = None,
+            record_events: bool = False,
+            store_artifacts: bool = False,
+            enable_checkpoints: bool = False,
+            checkpoint_keep_last: int = 3,
+            artifact_store_factory: ArtifactStoreFactory | None = None,
     ):
         self._bus = event_bus or EventBus([])
         self._record_events = bool(record_events)
         self._store_artifacts = bool(store_artifacts)
         self._enable_checkpoints = bool(enable_checkpoints)
         self._checkpoint_keep_last = int(checkpoint_keep_last)
+        self._artifact_store_factory = artifact_store_factory
 
     def run(
-        self,
-        cfg: dict,
-        *,
-        body: Callable[[RunContext], Any] | None = None,
-        resume_from: ArtifactRef | str | None = None,
+            self,
+            cfg: dict,
+            *,
+            body: Callable[[RunContext], Any] | None = None,
+            resume_from: ArtifactRef | str | None = None,
     ) -> RunResult:
         rcfg = validate_config(cfg)
 
@@ -149,7 +233,10 @@ class Runner(object):
         manifest_path = os.path.join(run_dir, "manifest.json")
         started = time.time()
 
-        store = LocalArtifactStore(root=os.path.join(run_dir, "artifacts"))
+        if self._artifact_store_factory is None:
+            store = LocalArtifactStore(root=os.path.join(run_dir, "artifacts"))
+        else:
+            store = self._artifact_store_factory(run_dir)
 
         ckpt = None
         if self._enable_checkpoints:
@@ -185,6 +272,7 @@ class Runner(object):
 
         status = "success"
         err_info = None
+        metrics = MetricSummary(values={}, extra={})
 
         if resume_from is not None:
             if ckpt is None:
@@ -215,12 +303,21 @@ class Runner(object):
         try:
             pub(StageStarted(type="stage_started", run_id=RunId(rcfg.run_id), ts=time.time(), data={}, stage="run"))
             if body is not None:
-                body(ctx)
+                body_result = body(ctx)
+                metrics = _metrics_from_body_result(body_result)
             pub(StageFinished(type="stage_finished", run_id=RunId(rcfg.run_id), ts=time.time(), data={}, stage="run"))
         except BaseException as e:
             status = "failed"
             se = e if isinstance(e, SaltAIError) else wrap_unknown(e, context={"run_id": rcfg.run_id})
             err_info = asdict(se.to_info())
+            pub(
+                RunFailed(
+                    type="run_failed",
+                    run_id=RunId(rcfg.run_id),
+                    ts=time.time(),
+                    data={"error": err_info},
+                )
+            )
         finally:
             pub(RunFinished(type="run_finished", run_id=RunId(rcfg.run_id), ts=time.time(), data={"status": status}))
             finished = time.time()
@@ -256,7 +353,7 @@ class Runner(object):
                     "artifacts": [asdict(a) for a in io.artifacts],
                     "checkpoints": checkpoints_out,
                 },
-                metrics={},
+                metrics=metrics.values,
                 error=err_info,
                 extra={},
             )
@@ -268,7 +365,7 @@ class Runner(object):
         return RunResult(
             run_id=RunId(rcfg.run_id),
             status=status,
-            metrics=MetricSummary(values={}, extra={}),
+            metrics=metrics,
             artifacts=tuple(io.artifacts),
             manifest_path=manifest_path,
             context={"run_dir": run_dir, "config_hash": rcfg.config_hash},

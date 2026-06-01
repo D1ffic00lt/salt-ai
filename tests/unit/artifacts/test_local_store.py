@@ -3,6 +3,8 @@ import tempfile
 import unittest
 
 from saltai.artifacts.store.local import LocalArtifactStore
+from saltai.utils.errors.base import ArtifactError
+from saltai.utils.errors.codes import EC
 
 
 class TestLocalArtifactStore(unittest.TestCase):
@@ -48,3 +50,34 @@ class TestLocalArtifactStore(unittest.TestCase):
             self.assertEqual(len(k1), 3)
             self.assertEqual(len(k2), 1)
             self.assertEqual(len(all_), 4)
+
+    def test_list_preserves_artifact_id_and_name(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = LocalArtifactStore(root=os.path.join(d, "store"))
+
+            src = os.path.join(d, "model.txt")
+            with open(src, "w", encoding="utf-8") as f:
+                f.write("weights")
+
+            ref = store.put(src, kind="model", name="best_model")
+
+            listed = store.list(kind="model")
+
+            self.assertEqual(len(listed), 1)
+            self.assertEqual(listed[0].id, ref.id)
+            self.assertEqual(listed[0].name, ref.name)
+            self.assertEqual(listed[0].kind, ref.kind)
+            self.assertEqual(listed[0].uri, ref.uri)
+
+    def test_put_rejects_unsafe_artifact_key(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = LocalArtifactStore(root=os.path.join(d, "store"))
+
+            src = os.path.join(d, "x.txt")
+            with open(src, "w", encoding="utf-8") as f:
+                f.write("hello")
+
+            with self.assertRaises(ArtifactError) as cm:
+                store.put(src, kind="model", name="../x")
+
+            self.assertEqual(cm.exception.code, EC.ARTIFACT_INVALID_REF)
