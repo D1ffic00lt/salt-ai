@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "salt-ai"
-version = "0.1.1"
+version = "0.1.3"
 description = "Lightweight ML pipeline library: configs, data modules, training engine, artifacts, and optional integrations."
 authors = ["D1ffic00lt <dm.filinov@gmail.com>"]
 license = "MIT"
@@ -21,7 +21,7 @@ boto3 = { version = ">=1.34", optional = true }
 [tool.poetry.extras]
 clearml = ["clearml"]
 s3 = ["boto3"]
-cloud = []
+cloud = ["xhttp"]
 all = ["clearml", "boto3"]
 
 [tool.poetry.urls]
